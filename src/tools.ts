@@ -22,6 +22,7 @@ import {
 import * as store from "./store.js";
 import type { CycleReport, RecoveryRecommendation, VerifyResult } from "./types.js";
 import {
+  capStrengthened,
   mace4FindModel,
   prover9Prove,
   z3CheckConsistency,
@@ -48,6 +49,13 @@ const GLOSS_DESC =
   "from the formalization alone (do not copy the claim text). Used to measure formalization " +
   "fidelity: embedding similarity between gloss and claim text. Low fidelity means your " +
   "encoding may not say what the claim says — reformalize rather than argue.";
+
+const STRENGTHENINGS_DESC =
+  "Declare anything that STRENGTHENS the encoding beyond the claim: concrete define-fun " +
+  "interpretations proposed for uninterpreted functions, added bounds/finitizations, extra " +
+  "assumptions. Refutations and models remain fully sound (original axioms are still " +
+  "asserted); proofs become interpretation-relative and are capped at 0.6 — below the " +
+  "commit gate. Omitting a real strengthening is a soundness violation on your side.";
 
 /** proved→1.0, refuted→0.0, everything else→0.5 (below the 0.7 gate). */
 function proofConfidence(r: VerifyResult): number {
@@ -205,14 +213,15 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         backend: z.enum(["z3", "prover9"]).optional(),
         claim_id: z.number().int().optional(),
         gloss: z.string().optional().describe(GLOSS_DESC),
+        strengthenings: z.array(z.string()).optional().describe(STRENGTHENINGS_DESC),
       },
     },
-    async ({ axioms, conjecture, backend, claim_id, gloss }) => {
+    async ({ axioms, conjecture, backend, claim_id, gloss, strengthenings }) => {
       const result =
         backend === "prover9"
           ? await prover9Prove(axioms, [conjecture])
           : await z3VerifyImplication(axioms, conjecture);
-      const pc = proofConfidence(result);
+      const { pc, ...capFlags } = capStrengthened(proofConfidence(result), strengthenings);
       const contradiction = result.result === "refuted";
       // Semantic channel: when bound to a claim, the proof result IS that claim.
       // Register the claim's text so edge_claim compares like with like
@@ -234,13 +243,14 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           proof_confidence: pc,
           fidelity: fid.fidelity,
           gloss: gloss ?? null,
+          strengthenings: strengthenings ?? null,
         });
       }
       let claim;
       if (claim_id !== undefined) {
         claim = store.recordVerification(db, claim_id, pc, contradiction, result.detail);
       }
-      return text({ ...result, proof_confidence: pc, ...fid, claim });
+      return text({ ...result, proof_confidence: pc, ...capFlags, ...fid, claim });
     },
   );
 
@@ -283,16 +293,17 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         backend: z.enum(["z3", "mace4"]).optional(),
         claim_id: z.number().int().optional(),
         gloss: z.string().optional().describe(GLOSS_DESC),
+        strengthenings: z.array(z.string()).optional().describe(STRENGTHENINGS_DESC),
       },
     },
-    async ({ axioms, conjecture, backend, claim_id, gloss }) => {
+    async ({ axioms, conjecture, backend, claim_id, gloss, strengthenings }) => {
       const result =
         backend === "mace4"
           ? await mace4FindModel(axioms, [conjecture])
           : await z3FindCounterexample(axioms, conjecture);
       const found = result.result === "sat" || result.result === "refuted";
       const entailed = result.result === "unsat" || result.result === "proved";
-      const pc = found ? 0.0 : entailed ? 1.0 : 0.5;
+      const { pc, ...capFlags } = capStrengthened(found ? 0.0 : entailed ? 1.0 : 0.5, strengthenings);
       // Same like-with-like rule as verify_implication (see comment there).
       const bound = claim_id !== undefined ? store.getClaim(db, claim_id) : undefined;
       registerFacet("verifier", {
@@ -311,13 +322,14 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           proof_confidence: pc,
           fidelity: fid.fidelity,
           gloss: gloss ?? null,
+          strengthenings: strengthenings ?? null,
         });
       }
       let claim;
       if (claim_id !== undefined) {
         claim = store.recordVerification(db, claim_id, pc, found, result.detail);
       }
-      return text({ ...result, counterexample_found: found, ...fid, claim });
+      return text({ ...result, counterexample_found: found, proof_confidence: pc, ...capFlags, ...fid, claim });
     },
   );
 

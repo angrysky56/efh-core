@@ -73,6 +73,16 @@ Z3 assertions are auto-named; `proved`/`unsat` results return `unsat_core` — t
 lines that carried the proof. A core that omits an "essential" axiom signals a possibly
 vacuous proof; `check_consistency` cores pinpoint which statements contradict.
 
+### Interpretation loop + soundness cap (v0.3)
+
+On `unknown`, the host agent may propose concrete interpretations for
+uninterpreted functions or add bounds (AquaForte-style CEGAR, with the agent as
+the LLM-in-the-loop and `get_formalizations` as the exclusion memory). Such
+encodings are declared via `strengthenings` on the verify tools. The logical
+asymmetry is enforced: models and refutations under strengthening remain fully
+sound (original axioms still asserted); proofs become interpretation-relative
+and are capped at pc 0.6 — below the commit gate. See the efh-loop skill.
+
 ### Calibration (v0.2)
 
 `npm run calibrate` measures embedding-distance distributions for paraphrase /

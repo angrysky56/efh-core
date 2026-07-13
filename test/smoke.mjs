@@ -24,9 +24,8 @@ const { loadState, saveState } = await import("../dist/enforcer/state.js");
 const { runFullCycle, stringToFloat } = await import("../dist/enforcer/admm.js");
 const { Embedder } = await import("../dist/embeddings.js");
 const store = await import("../dist/store.js");
-const { z3VerifyImplication, z3FindCounterexample, z3CheckConsistency } = await import(
-  "../dist/verifier.js"
-);
+const { z3VerifyImplication, z3FindCounterexample, z3CheckConsistency, capStrengthened } =
+  await import("../dist/verifier.js");
 
 let failures = 0;
 function check(name, cond, detail = "") {
@@ -145,13 +144,30 @@ store.saveFormalization(db, {
   proof_confidence: 1,
   fidelity: 1,
   gloss: "p holds given that p is asserted",
+  strengthenings: ["f(x) := 2x (example)"],
 });
 const forms = store.getFormalizations(db, claim.id);
 check(
   "formalization round-trip",
-  forms.length === 1 && Array.isArray(forms[0].axioms) && forms[0].axioms.length === 2,
+  forms.length === 1 &&
+    Array.isArray(forms[0].axioms) &&
+    forms[0].axioms.length === 2 &&
+    Array.isArray(forms[0].strengthenings),
   `n=${forms.length}`,
 );
+
+// --- strengthening soundness cap -------------------------------------------------
+check(
+  "strengthened proof capped at 0.6",
+  capStrengthened(1.0, ["f := 2x"]).pc === 0.6 &&
+    capStrengthened(1.0, ["f := 2x"]).strengthened_proof === true,
+);
+check(
+  "refutation unaffected by strengthening",
+  capStrengthened(0.0, ["f := 2x"]).pc === 0 &&
+    capStrengthened(0.0, ["f := 2x"]).strengthened_proof === undefined,
+);
+check("faithful proof uncapped", capStrengthened(1.0, undefined).pc === 1.0);
 
 // --- gate ---------------------------------------------------------------------
 store.recordVerification(db, claim.id, 1.0, false, "smoke: proved");

@@ -1,6 +1,6 @@
 {
   "name": "efh-core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Consolidated EFH reasoning server: claim store, formal verification (Z3 / optional Prover9), sheaf ADMM consistency enforcement, gated commits",
   "type": "module",
   "bin": {

@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS formalizations (
   proof_confidence REAL,
   fidelity REAL,
   gloss TEXT,
+  strengthenings TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
@@ -80,7 +81,16 @@ export function openDb(path: string = defaultDbPath()): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
+}
+
+/** Additive migrations for databases created by earlier versions. */
+function migrate(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info(formalizations)").all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === "strengthenings")) {
+    db.exec("ALTER TABLE formalizations ADD COLUMN strengthenings TEXT");
+  }
 }
 
 export function kvGet(db: Database.Database, key: string): string | null {

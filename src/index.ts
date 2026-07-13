@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   const state = loadState(db);
   const embedder = new Embedder(db);
 
-  const server = new McpServer({ name: "efh-core", version: "0.2.0" });
+  const server = new McpServer({ name: "efh-core", version: "0.3.0" });
   registerTools(server, { db, state, embedder });
 
   const shutdown = (signal: string) => {

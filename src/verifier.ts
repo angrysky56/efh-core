@@ -220,6 +220,30 @@ export async function z3FindCounterexample(
   return r;
 }
 
+/**
+ * Soundness cap for strengthened encodings (concrete interpretations of
+ * uninterpreted functions, added bounds/finitizations).
+ *
+ * Models and refutations remain fully valid — the original axioms are still
+ * asserted, so any model found genuinely satisfies them. Proofs become
+ * interpretation-relative: UNSAT of a strengthened formula establishes the
+ * conjecture only under that strengthening, not for all interpretations.
+ * Such proofs are capped at 0.6 — deliberately below the commit gate.
+ */
+export function capStrengthened(
+  pc: number,
+  strengthenings: string[] | undefined,
+): { pc: number; strengthened_proof?: true; strengthening_note?: string } {
+  if (!strengthenings?.length || pc <= 0.6) return { pc };
+  return {
+    pc: 0.6,
+    strengthened_proof: true,
+    strengthening_note:
+      `Proof is relative to declared strengthenings (${strengthenings.join("; ")}) — ` +
+      "capped at 0.6, below the commit gate. Refutations and models are unaffected by strengthening.",
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Prover9 / Mace4 (optional external backend)
 // ---------------------------------------------------------------------------

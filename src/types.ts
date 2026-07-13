@@ -86,6 +86,8 @@ export interface VerifyResult {
   model?: string;
   /** Z3 unsat/proved results: the asserted lines that carried the proof. */
   unsat_core?: string[];
+  /** Set when a proof was obtained under declared strengthenings (interpretation-relative). */
+  strengthened_proof?: true;
   elapsed_ms: number;
 }
 
@@ -102,6 +104,8 @@ export interface Formalization {
   /** 1 − embedding distance between claim text and the independent gloss; null if unmeasured. */
   fidelity: number | null;
   gloss: string | null;
+  /** JSON array of declared strengthenings (UF interpretations, bounds); null if faithful. */
+  strengthenings: string | null;
   created_at: string;
 }
 

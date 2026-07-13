@@ -62,6 +62,35 @@ Session start: `reset_session(confirm=true)`. Claims persist; enforcer state doe
 H¹ obstruction means three registered states form a cyclic contradiction — they cannot
 all be true. Find which one is wrong before re-registering.
 
+## Interpretation Loop — when the verifier returns `unknown`
+
+`unknown` is not a dead end; it is the entry point for agent-guided solving
+(CEGAR-style, LLM-in-the-loop — which is you). Procedure:
+
+1. **Separate** — isolate the stuck subproblem; verifications are already
+   claim-scoped, so formalize the smallest independent constraint set.
+2. **Read history** — `get_formalizations(claim_id)`: past attempts with results
+   are your exclusion memory. Never repeat a failed encoding or interpretation.
+3. **Propose** — where uninterpreted functions block progress, propose concrete
+   `(define-fun ...)` interpretations from the semantic context; or add bounds
+   to finitize an undecidable search. Re-verify with `strengthenings` listing
+   every such addition.
+4. **Soundness table** (why the cap exists):
+   - Counterexample / SAT under strengthening → **fully valid** (original axioms
+     still asserted; any model is a genuine model).
+   - Proof under strengthening → **interpretation-relative**: capped at pc 0.6,
+     below the gate. It proves the claim for that interpretation only.
+   - Bounded UNSAT ("no solution below 10^k") → evidence, not proof. Same cap.
+5. **Exclude and retry** — on a failed interpretation, assert exclusion clauses
+   in the next attempt (e.g. `(assert (not (= (f c) k)))`) and record what
+   failed in the claim's audit trail.
+6. **Fall back** — after 2–3 rounds, run the original faithful encoding once
+   more (exclusions may have pruned the space), then accept `unknown` honestly:
+   "cannot verify within current closure bounds."
+
+Declaring strengthenings is mandatory, not optional — an undeclared
+strengthening is a soundness violation that the server cannot detect.
+
 ## Epistemics (structural, not advisory)
 
 - **Uncertainty rule**: "I cannot verify this within current closure bounds" is a correct

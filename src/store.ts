@@ -208,10 +208,11 @@ export function saveFormalization(
     proof_confidence: number | null;
     fidelity: number | null;
     gloss: string | null;
+    strengthenings: string[] | null;
   },
 ): void {
   db.prepare(
-    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, gloss) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     f.claim_id,
     JSON.stringify(f.axioms),
@@ -221,17 +222,27 @@ export function saveFormalization(
     f.proof_confidence,
     f.fidelity,
     f.gloss,
+    f.strengthenings ? JSON.stringify(f.strengthenings) : null,
   );
 }
 
 export function getFormalizations(
   db: Database.Database,
   claimId: number,
-): Array<Omit<Formalization, "axioms"> & { axioms: string[] }> {
+): Array<
+  Omit<Formalization, "axioms" | "strengthenings"> & {
+    axioms: string[];
+    strengthenings: string[] | null;
+  }
+> {
   const rows = db
     .prepare("SELECT * FROM formalizations WHERE claim_id = ? ORDER BY id DESC")
     .all(claimId) as Formalization[];
-  return rows.map((r) => ({ ...r, axioms: JSON.parse(r.axioms) as string[] }));
+  return rows.map((r) => ({
+    ...r,
+    axioms: JSON.parse(r.axioms) as string[],
+    strengthenings: r.strengthenings ? (JSON.parse(r.strengthenings) as string[]) : null,
+  }));
 }
 
 export function getAuditTrail(
