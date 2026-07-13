@@ -54,22 +54,86 @@ function modelToString(m: unknown): string {
   return String(m);
 }
 
+/** Auto-name plain assertions for unsat-core tracking: (assert X) → (assert (! X :named axN)). */
+function nameAssertions(statements: string[]): { script: string[]; names: Map<string, string> } {
+  const names = new Map<string, string>();
+  let i = 0;
+  const script = statements.map((line) => {
+    const t = line.trim();
+    if (!t.startsWith("(assert ") || t.includes(":named")) {
+      const m = t.match(/:named\s+([^\s)]+)/);
+      if (m) names.set(m[1], t);
+      return line;
+    }
+    const inner = t.slice("(assert".length, t.lastIndexOf(")")).trim();
+    const name = `ax${i++}`;
+    names.set(name, t);
+    return `(assert (! ${inner} :named ${name}))`;
+  });
+  return { script, names };
+}
+
+/** Best-effort unsat core extraction, mapped back to the original assertion lines. */
+function extractCore(solver: unknown, names: Map<string, string>): string[] | undefined {
+  try {
+    const s = solver as { unsatCore?: () => unknown };
+    if (typeof s.unsatCore !== "function") return undefined;
+    const raw = s.unsatCore() as unknown;
+    let items: unknown[] = [];
+    if (Array.isArray(raw)) {
+      items = raw;
+    } else {
+      const v = raw as { length?: () => number; get?: (i: number) => unknown };
+      if (typeof v?.length === "function" && typeof v?.get === "function") {
+        items = Array.from({ length: v.length() }, (_, k) => v.get!(k));
+      }
+    }
+    const lines = items
+      .map((c) => String(c).replace(/\|/g, "").trim())
+      .map((n) => names.get(n) ?? n)
+      .filter((line) => !line.includes(":named negated_conjecture"));
+    return lines.length > 0 ? lines : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Core Z3 run: assert the given SMT-LIB statements, check satisfiability.
  * `statements` are raw SMT-LIB 2 lines (declarations + assertions).
+ * Assertions are auto-named so unsat results carry a core (which assertions
+ * did the work); if the cores path fails for any reason, retries plain.
  */
 async function z3Check(statements: string[]): Promise<VerifyResult> {
   const t0 = Date.now();
   try {
     const ctx = await getZ3();
-    const solver = new ctx.Solver();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const run = async (script: string[]): Promise<{ solver: any; res: string }> => {
+      const solver = new ctx.Solver();
+      try {
+        solver.set("timeout", Z3_TIMEOUT_MS);
+      } catch {
+        /* older API without set(): rely on outer behavior */
+      }
+      solver.fromString(script.join("\n"));
+      const res: string = await solver.check();
+      return { solver, res };
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let solver: any;
+    let res: string;
+    let names: Map<string, string> | undefined;
     try {
-      solver.set("timeout", Z3_TIMEOUT_MS);
+      const named = nameAssertions(statements);
+      names = named.names;
+      ({ solver, res } = await run(["(set-option :produce-unsat-cores true)", ...named.script]));
     } catch {
-      /* older API without set(): rely on outer behavior */
+      names = undefined;
+      ({ solver, res } = await run(statements));
     }
-    solver.fromString(statements.join("\n"));
-    const res: string = await solver.check();
+
     if (res === "sat") {
       return {
         backend: "z3",
@@ -84,6 +148,7 @@ async function z3Check(statements: string[]): Promise<VerifyResult> {
         backend: "z3",
         result: "unsat",
         detail: "Unsatisfiable",
+        unsat_core: names ? extractCore(solver, names) : undefined,
         elapsed_ms: Date.now() - t0,
       };
     }
@@ -108,9 +173,18 @@ export async function z3VerifyImplication(
   axioms: string[],
   conjecture: string,
 ): Promise<VerifyResult> {
-  const r = await z3Check([...axioms, `(assert (not ${conjecture}))`]);
+  const r = await z3Check([
+    ...axioms,
+    `(assert (! (not ${conjecture}) :named negated_conjecture))`,
+  ]);
   if (r.result === "unsat") {
-    return { ...r, result: "proved", detail: "Conjecture follows from axioms (¬conjecture unsat)" };
+    return {
+      ...r,
+      result: "proved",
+      detail:
+        "Conjecture follows from axioms (¬conjecture unsat)" +
+        (r.unsat_core ? " — unsat_core lists the axioms that carried the proof" : ""),
+    };
   }
   if (r.result === "sat") {
     return {
@@ -135,7 +209,10 @@ export async function z3FindCounterexample(
   axioms: string[],
   conjecture: string,
 ): Promise<VerifyResult> {
-  const r = await z3Check([...axioms, `(assert (not ${conjecture}))`]);
+  const r = await z3Check([
+    ...axioms,
+    `(assert (! (not ${conjecture}) :named negated_conjecture))`,
+  ]);
   if (r.result === "sat") return { ...r, detail: "Counterexample model found" };
   if (r.result === "unsat") {
     return { ...r, detail: "No counterexample exists — conjecture is entailed" };

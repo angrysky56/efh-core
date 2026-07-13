@@ -110,6 +110,11 @@ const mp = await z3VerifyImplication(
   "q",
 );
 check("z3 modus ponens proved", mp.result === "proved", `${mp.result}: ${mp.detail}`);
+check(
+  "unsat core lists both premises",
+  Array.isArray(mp.unsat_core) && mp.unsat_core.length === 2,
+  JSON.stringify(mp.unsat_core),
+);
 
 const cex = await z3FindCounterexample(
   ["(declare-const p Bool)", "(declare-const q Bool)", "(assert (=> p q))"],
@@ -124,6 +129,29 @@ const incons = await z3CheckConsistency([
   "(assert (not p))",
 ]);
 check("z3 detects inconsistency", incons.result === "unsat", incons.result);
+check(
+  "consistency core pinpoints the contradiction",
+  Array.isArray(incons.unsat_core) && incons.unsat_core.length === 2,
+  JSON.stringify(incons.unsat_core),
+);
+
+// --- formalization persistence -------------------------------------------------
+store.saveFormalization(db, {
+  claim_id: claim.id,
+  axioms: ["(declare-const p Bool)", "(assert p)"],
+  conjecture: "p",
+  backend: "z3",
+  result: "proved",
+  proof_confidence: 1,
+  fidelity: 1,
+  gloss: "p holds given that p is asserted",
+});
+const forms = store.getFormalizations(db, claim.id);
+check(
+  "formalization round-trip",
+  forms.length === 1 && Array.isArray(forms[0].axioms) && forms[0].axioms.length === 2,
+  `n=${forms.length}`,
+);
 
 // --- gate ---------------------------------------------------------------------
 store.recordVerification(db, claim.id, 1.0, false, "smoke: proved");

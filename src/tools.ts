@@ -40,6 +40,15 @@ const text = (obj: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(obj, null, 2) }],
 });
 
+/** Below this, the gloss (what the formalization says) diverges from the claim (what was meant). */
+const FIDELITY_MIN = Number(process.env.EFH_FIDELITY_MIN ?? 0.6);
+
+const GLOSS_DESC =
+  "Independent English rendering of what the axioms + conjecture LITERALLY say, written " +
+  "from the formalization alone (do not copy the claim text). Used to measure formalization " +
+  "fidelity: embedding similarity between gloss and claim text. Low fidelity means your " +
+  "encoding may not say what the claim says — reformalize rather than argue.";
+
 /** proved→1.0, refuted→0.0, everything else→0.5 (below the 0.7 gate). */
 function proofConfidence(r: VerifyResult): number {
   if (r.result === "proved") return 1.0;
@@ -60,6 +69,37 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
     state.agent_states[agentId] = facetState;
     state.agent_last_seen[agentId] = Date.now() / 1000;
     persist();
+  };
+
+  /**
+   * Formalization fidelity: 1 − embedding distance between claim text and the
+   * independently written gloss. Never fails the verification — an unmeasured
+   * fidelity is reported as such (fail-loud on the measurement, not the proof).
+   */
+  const measureFidelity = async (
+    claimText: string | undefined,
+    gloss: string | undefined,
+  ): Promise<{ fidelity: number | null; fidelity_warning?: true; fidelity_note?: string }> => {
+    if (!claimText) return { fidelity: null };
+    if (!gloss) {
+      return { fidelity: null, fidelity_note: "no gloss supplied — formalization fidelity unmeasured" };
+    }
+    try {
+      const d = await embedder.distance(claimText, gloss);
+      const fidelity = Math.round((1 - d) * 10000) / 10000;
+      return fidelity < FIDELITY_MIN
+        ? {
+            fidelity,
+            fidelity_warning: true,
+            fidelity_note: `fidelity ${fidelity} < ${FIDELITY_MIN}: the formalization may not say what the claim says — reformalize`,
+          }
+        : { fidelity };
+    } catch (err) {
+      return {
+        fidelity: null,
+        fidelity_note: `fidelity unmeasured: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -164,9 +204,10 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         conjecture: z.string(),
         backend: z.enum(["z3", "prover9"]).optional(),
         claim_id: z.number().int().optional(),
+        gloss: z.string().optional().describe(GLOSS_DESC),
       },
     },
-    async ({ axioms, conjecture, backend, claim_id }) => {
+    async ({ axioms, conjecture, backend, claim_id, gloss }) => {
       const result =
         backend === "prover9"
           ? await prover9Prove(axioms, [conjecture])
@@ -182,11 +223,24 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         proof_confidence: pc,
         contradictions_found: contradiction,
       });
+      const fid = await measureFidelity(bound?.text, gloss);
+      if (bound && claim_id !== undefined) {
+        store.saveFormalization(db, {
+          claim_id,
+          axioms,
+          conjecture,
+          backend: result.backend,
+          result: result.result,
+          proof_confidence: pc,
+          fidelity: fid.fidelity,
+          gloss: gloss ?? null,
+        });
+      }
       let claim;
       if (claim_id !== undefined) {
         claim = store.recordVerification(db, claim_id, pc, contradiction, result.detail);
       }
-      return text({ ...result, proof_confidence: pc, claim });
+      return text({ ...result, proof_confidence: pc, ...fid, claim });
     },
   );
 
@@ -228,9 +282,10 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         conjecture: z.string(),
         backend: z.enum(["z3", "mace4"]).optional(),
         claim_id: z.number().int().optional(),
+        gloss: z.string().optional().describe(GLOSS_DESC),
       },
     },
-    async ({ axioms, conjecture, backend, claim_id }) => {
+    async ({ axioms, conjecture, backend, claim_id, gloss }) => {
       const result =
         backend === "mace4"
           ? await mace4FindModel(axioms, [conjecture])
@@ -245,12 +300,40 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         proof_confidence: pc,
         contradictions_found: found,
       });
+      const fid = await measureFidelity(bound?.text, gloss);
+      if (bound && claim_id !== undefined) {
+        store.saveFormalization(db, {
+          claim_id,
+          axioms,
+          conjecture,
+          backend: result.backend,
+          result: result.result,
+          proof_confidence: pc,
+          fidelity: fid.fidelity,
+          gloss: gloss ?? null,
+        });
+      }
       let claim;
       if (claim_id !== undefined) {
         claim = store.recordVerification(db, claim_id, pc, found, result.detail);
       }
-      return text({ ...result, counterexample_found: found, claim });
+      return text({ ...result, counterexample_found: found, ...fid, claim });
     },
+  );
+
+  server.registerTool(
+    "get_formalizations",
+    {
+      title: "Get formalizations",
+      description:
+        "Review the formal encodings behind a claim's verifications: axioms, conjecture, " +
+        "backend, result, gloss, and fidelity vs the claim text. The formalization step is " +
+        "the weakest link in the loop — audit it before trusting a proof.",
+      inputSchema: {
+        claim_id: z.number().int(),
+      },
+    },
+    async ({ claim_id }) => text(store.getFormalizations(db, claim_id)),
   );
 
   // -------------------------------------------------------------------------
@@ -526,6 +609,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           semantic_channel: (process.env.EFH_SEMANTIC ?? "on").toLowerCase() !== "off" ? "on" : "off",
         },
         commit_min_confidence: Number(process.env.EFH_COMMIT_MIN_CONFIDENCE ?? 0.7),
+        fidelity_min: FIDELITY_MIN,
       });
     },
   );

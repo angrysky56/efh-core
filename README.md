@@ -50,12 +50,36 @@ graded embedding cosine distance (paraphrases no longer register as full disagre
 Hash mode remains default per mapping; `compare: "semantic"` opts in (used by the
 default `edge_claim` channels).
 
-## Tools (15)
+## Tools (16)
 
-`assert_claim` `get_claims` `link_claims` `get_audit_trail` ·
+`assert_claim` `get_claims` `link_claims` `get_audit_trail` `get_formalizations` ·
 `verify_implication` `check_consistency` `find_counterexample` ·
 `register_agent_state` `run_admm_cycle` `get_closure_status` `trigger_recovery`
 `set_restriction_map` `reset_session` · `commit_claim` · `session_status`
+
+### Formalization fidelity (v0.2)
+
+The weakest link in the loop is the translation from claim text to SMT-LIB — a bad
+encoding gets "proved" and the gate would stamp verified nonsense. Every claim-bound
+verification is therefore persisted as a reviewable formalization (axioms, conjecture,
+result), and the verify tools accept a `gloss`: an independent English rendering of what
+the encoding literally says. The server measures `fidelity` = 1 − embedding distance
+(claim text vs gloss) and warns below `EFH_FIDELITY_MIN`. Reported, not gated — thresholds
+come from calibration data, not intuition.
+
+### Unsat cores (v0.2)
+
+Z3 assertions are auto-named; `proved`/`unsat` results return `unsat_core` — the asserted
+lines that carried the proof. A core that omits an "essential" axiom signals a possibly
+vacuous proof; `check_consistency` cores pinpoint which statements contradict.
+
+### Calibration (v0.2)
+
+`npm run calibrate` measures embedding-distance distributions for paraphrase /
+contradiction / unrelated pairs and suggests a data-driven `epsilon_primal` for
+semantic-mode edges. Expected finding: embeddings track claim *identity* (paraphrase vs
+unrelated separates cleanly), not truth agreement — contradiction detection rides on the
+scalar channels by design.
 
 ## Install
 
@@ -70,7 +94,7 @@ Client config:
   "mcpServers": {
     "efh-core": {
       "command": "node",
-      "args": ["/your-path-to/efh-core/dist/index.js"]
+      "args": ["/home/ty/Repositories/ai_workspace/efh-core/dist/index.js"]
     }
   }
 }
@@ -87,6 +111,9 @@ Skills: copy `skills/*` into `~/.claude/skills/` (canonical copies live in this 
 | `OLLAMA_HOST` | embedding endpoint | `http://localhost:11434` |
 | `EFH_EMBED_MODEL` | embedding model | `nomic-embed-text` |
 | `EFH_COMMIT_MIN_CONFIDENCE` | gate threshold | `0.7` |
+| `EFH_FIDELITY_MIN` | formalization-fidelity warning threshold | `0.6` |
+| `EFH_EPSILON_PRIMAL` | coboundary escalation threshold (calibrate first) | `0.15` |
+| `EFH_DUAL_WARNING` | dual-pressure WARNING threshold | `5.0` |
 | `EFH_Z3_TIMEOUT_MS` | Z3 per-check timeout | `15000` |
 | `EFH_PROVER9_TIMEOUT_S` | LADR max_seconds | `30` |
 | `PROVER9_PATH` / `MACE4_PATH` | LADR binaries | resolved from PATH |
@@ -107,10 +134,11 @@ baselines need to be re-established.
 ## Roadmap
 
 - Re-run the 2026-03-14 enforcer baseline procedure against this port (hash mode should
-  reproduce; semantic mode needs new baselines).
-- Unsat cores as proof artifacts (named assertions).
+  reproduce; semantic mode: start from `npm run calibrate`).
 - FTS5 claim search.
 - Prover9 ↔ Z3 cross-checks on the EFHF axiom set.
+- If HOL statements ever appear: Isabelle as an optional external backend via the
+  existing backend seam (until then, Vampire/E via TPTP is the lighter FOL upgrade).
 
 ## References
 

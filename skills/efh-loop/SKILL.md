@@ -22,6 +22,14 @@ hypothesized, not proven, to track closure. Say "verified within closure bounds,
 3. **VERIFY** — `verify_implication` (SMT-LIB axioms + conjecture, pass `claim_id`) or
    `find_counterexample`. Formalize the *structure* of the claim; if it cannot be
    formalized, say so and treat belief as capped at 0.6.
+   **Gloss discipline** (the formalization is the weakest link): after writing the
+   axioms, write a `gloss` — an English statement of what the encoding literally says,
+   from the formalization alone, without re-reading the claim. Pass it with the call.
+   `fidelity_warning: true` means your encoding may not say what the claim says —
+   reformalize, don't argue. `proved` results include `unsat_core`: the axioms that
+   carried the proof. If the core omits an axiom you consider essential, the proof may
+   be vacuous (e.g., inconsistent premises) — inspect before trusting. Audit past
+   encodings with `get_formalizations(claim_id)`.
 4. **MONITOR** — `register_agent_state` as `"reasoner"`:
    `{current_hypothesis, confidence_score, halt_flag, verified_claim?}`. Report your real
    confidence, not aspiration.

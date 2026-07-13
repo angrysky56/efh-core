@@ -50,8 +50,21 @@ CREATE TABLE IF NOT EXISTS embeddings (
   vec BLOB NOT NULL,
   PRIMARY KEY (hash, model)
 );
+CREATE TABLE IF NOT EXISTS formalizations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  claim_id INTEGER NOT NULL REFERENCES claims(id),
+  axioms TEXT NOT NULL,
+  conjecture TEXT NOT NULL,
+  backend TEXT NOT NULL,
+  result TEXT NOT NULL,
+  proof_confidence REAL,
+  fidelity REAL,
+  gloss TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_audit_claim ON audit(claim_id);
+CREATE INDEX IF NOT EXISTS idx_formalizations_claim ON formalizations(claim_id);
 `;
 
 /** Resolve the database path: EFH_DB_PATH env override, else XDG data dir. */

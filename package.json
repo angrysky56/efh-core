@@ -1,6 +1,6 @@
 {
   "name": "efh-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Consolidated EFH reasoning server: claim store, formal verification (Z3 / optional Prover9), sheaf ADMM consistency enforcement, gated commits",
   "type": "module",
   "bin": {
@@ -13,7 +13,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "smoke": "node test/smoke.mjs"
+    "smoke": "node test/smoke.mjs",
+    "calibrate": "node test/calibrate.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -25,8 +26,5 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.12.0",
     "typescript": "^5.7.2"
-  },
-  "allowScripts": {
-    "better-sqlite3@12.11.1": true
   }
 }

@@ -84,7 +84,25 @@ export interface VerifyResult {
   detail: string;
   /** Model / counterexample s-expression when one exists. */
   model?: string;
+  /** Z3 unsat/proved results: the asserted lines that carried the proof. */
+  unsat_core?: string[];
   elapsed_ms: number;
+}
+
+/** A persisted formal encoding of a claim — reviewable and replayable. */
+export interface Formalization {
+  id: number;
+  claim_id: number;
+  /** JSON array of SMT-LIB / Prover9 lines as supplied. */
+  axioms: string;
+  conjecture: string;
+  backend: string;
+  result: string;
+  proof_confidence: number | null;
+  /** 1 − embedding distance between claim text and the independent gloss; null if unmeasured. */
+  fidelity: number | null;
+  gloss: string | null;
+  created_at: string;
 }
 
 export interface Claim {

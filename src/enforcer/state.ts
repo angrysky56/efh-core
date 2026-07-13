@@ -267,6 +267,14 @@ export function loadState(db: Database.Database): SessionState {
     }
   }
   seedDefaultRestrictionMaps(state);
+  // Threshold env overrides win over persisted values — calibration is a
+  // deployment decision (see test/calibrate.mjs), not session memory.
+  if (process.env.EFH_EPSILON_PRIMAL) {
+    state.epsilon_primal = Number(process.env.EFH_EPSILON_PRIMAL);
+  }
+  if (process.env.EFH_DUAL_WARNING) {
+    state.dual_warning_threshold = Number(process.env.EFH_DUAL_WARNING);
+  }
   return state;
 }
 
