@@ -1,5 +1,6 @@
 session EFHF = HOL +
-  description "EFHF Triadic Kernel locale: kernel-checked Isar proofs of the 2026-03-13 theorems"
+  description "EFHF: kernel-checked Triadic Kernel locale + definitional grounding of closure over dynamics"
   options [document = false]
   theories
     EFHF
+    EFHF_Grounding
