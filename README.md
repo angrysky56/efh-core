@@ -83,6 +83,19 @@ asymmetry is enforced: models and refutations under strengthening remain fully
 sound (original axioms still asserted); proofs become interpretation-relative
 and are capped at pc 0.6 — below the commit gate. See the efh-loop skill.
 
+### Isabelle layer (slow tier)
+
+`isabelle/EFHF.thy` holds the Triadic Kernel axioms as a **locale** with the
+2026-03-13 theorems proven in structured Isar and kernel-checked
+(`isabelle build -D isabelle/`). The locale makes axiom-relativity syntactic:
+theorems cannot leave the context without carrying the stipulations. Two-tier
+division of labor: Z3 in-loop (milliseconds, claim gating); Isabelle for the
+canon (LCF-kernel assurance, readable proof documents). The axiom set now has
+three independent provers agreeing: Prover9 (resolution), Z3 (SMT), Isabelle
+(kernel-checked natural deduction). Successor arc: definitional grounding —
+define the closure predicates over Markov kernels/partitions via
+HOL-Probability and *prove* the chain instead of assuming it.
+
 ### Calibration (v0.2)
 
 `npm run calibrate` measures embedding-distance distributions for paraphrase /

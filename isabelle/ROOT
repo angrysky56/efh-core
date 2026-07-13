@@ -1,0 +1,5 @@
+session EFHF = HOL +
+  description "EFHF Triadic Kernel locale: kernel-checked Isar proofs of the 2026-03-13 theorems"
+  options [document = false]
+  theories
+    EFHF
