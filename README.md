@@ -1,7 +1,7 @@
 # efh-core
 
 A verification workbench for AI reasoning. One MCP server plus four skills that
-separate what an AI model *says* from what the system *accepts as known*.
+separate what an AI model _says_ from what the system _accepts as known_.
 
 ## The idea
 
@@ -13,15 +13,15 @@ suspect to run the investigation.
 
 EFH (Emergent Functional Hierarchies) approaches this structurally instead of
 hopefully. The model keeps its role as an idea generator, but nothing it says
-becomes *knowledge* until it passes through machinery the model does not
+becomes _knowledge_ until it passes through machinery the model does not
 control:
 
 1. **A claim ledger.** Every substantive statement is written down as an
    explicit claim with a confidence score — outside the model, in a database,
    where it can be examined, linked to other claims, and audited later.
 2. **A prover.** Claims that can be stated formally are handed to a theorem
-   prover (Z3), which returns *proved*, *refuted with a counterexample*, or an
-   honest *can't tell* — never a vibe.
+   prover (Z3), which returns _proved_, _refuted with a counterexample_, or an
+   honest _can't tell_ — never a vibe.
 3. **A consistency monitor.** Three perspectives are tracked continuously —
    what the model believes, what the prover established, and what the model is
    currently arguing. When they drift apart, an alarm escalates through
@@ -113,18 +113,18 @@ yellow, and the gate refuses with the reason spelled out.
 
 ## Configuration
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `EFH_DB_PATH` | SQLite location | `~/.local/share/efh-core/efh.db` |
-| `EFH_SEMANTIC` | `on` / `off` — semantic comparison channel | `on` |
-| `OLLAMA_HOST` | embedding endpoint | `http://localhost:11434` |
-| `EFH_EMBED_MODEL` | embedding model | `nomic-embed-text` |
-| `EFH_COMMIT_MIN_CONFIDENCE` | gate threshold | `0.7` |
-| `EFH_FIDELITY_MIN` | formalization-fidelity warning threshold | `0.6` |
-| `EFH_EPSILON_PRIMAL` | monitor escalation threshold | `0.15` |
-| `EFH_DUAL_WARNING` | monitor pressure threshold | `5.0` |
-| `EFH_Z3_TIMEOUT_MS` | prover timeout per check | `15000` |
-| `PROVER9_PATH` / `MACE4_PATH` | optional LADR binaries | from PATH |
+| Variable                      | Purpose                                    | Default                          |
+| ----------------------------- | ------------------------------------------ | -------------------------------- |
+| `EFH_DB_PATH`                 | SQLite location                            | `~/.local/share/efh-core/efh.db` |
+| `EFH_SEMANTIC`                | `on` / `off` — semantic comparison channel | `on`                             |
+| `OLLAMA_HOST`                 | embedding endpoint                         | `http://localhost:11434`         |
+| `EFH_EMBED_MODEL`             | embedding model                            | `nomic-embed-text`               |
+| `EFH_COMMIT_MIN_CONFIDENCE`   | gate threshold                             | `0.7`                            |
+| `EFH_FIDELITY_MIN`            | formalization-fidelity warning threshold   | `0.6`                            |
+| `EFH_EPSILON_PRIMAL`          | monitor escalation threshold               | `0.15`                           |
+| `EFH_DUAL_WARNING`            | monitor pressure threshold                 | `5.0`                            |
+| `EFH_Z3_TIMEOUT_MS`           | prover timeout per check                   | `15000`                          |
+| `PROVER9_PATH` / `MACE4_PATH` | optional LADR binaries                     | from PATH                        |
 
 ## Going deeper
 
