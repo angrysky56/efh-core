@@ -62,6 +62,35 @@ Session start: `reset_session(confirm=true)`. Claims persist; enforcer state doe
 H¹ obstruction means three registered states form a cyclic contradiction — they cannot
 all be true. Find which one is wrong before re-registering.
 
+## Trajectory Discipline
+
+Empirically grounded rules (SPARC spectral blind-spot theory, arXiv:2607.09803;
+Goodfire/Eternis forecaster probing, arXiv:2607.08046 — both 2026 preprints,
+mechanisms plausible, quantitative claims provisional):
+
+- **Externalize before re-examining.** Self-generated errors ride their own
+  amplification through the residual stream and are structurally invisible from
+  inside the trajectory that produced them; the same errors are correctable when
+  externally attributed. The loop exploits this structurally: assert first, then
+  critique the *stored claim* — a tool result, an external object. Never re-read
+  your own in-context draft and pronounce it sound; round-trip it through the
+  store or the verifier first.
+- **Spread triage before deep verification.** Answers are largely fixed before
+  reasoning begins. State your pre-reasoning answer and confidence first (or
+  sample it 3×). Low spread → one verification pass suffices. High spread →
+  full loop plus via-negativa. Allocate verification where the pre-commitment
+  distribution is wide, not uniformly.
+- **Break trajectories; don't nudge them.** After a refutation or on
+  WEAK/WARNING, hedged continuations won't clear a self-confirming trajectory —
+  correction requires a perturbation above threshold. Open a fresh reasoning
+  branch that takes the refutation as an external premise; do not continue the
+  old chain with softeners.
+- **Verbalized confidence is the weakest signal in this loop.** Probe-derived
+  confidence beats it where probe infrastructure exists (local models — see
+  efh-core/docs/probe-confidence-spec.md). Absent probes, derive
+  confidence_score from spread and verification outcomes, not from how
+  confident the prose feels.
+
 ## Interpretation Loop — when the verifier returns `unknown`
 
 `unknown` is not a dead end; it is the entry point for agent-guided solving
