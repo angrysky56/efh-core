@@ -81,6 +81,27 @@ node experiments/fidelity-probe/embed-baseline.mjs
 It writes `embedding-results.json` and `comparison.json`, and prints the
 head-to-head table.
 
+## End to end through the gate
+
+`gate-e2e.mjs` drives the real MCP surface: one claim, one set of axioms, one Z3
+proof, two glosses. Z3 returns `proved` both times.
+
+```
+PASS faithful:   proof=proved fidelity=0.69 (judgment, equivalent)     committed=true
+PASS unfaithful: proof=proved fidelity=0.15 (judgment, scope_differs)  committed=false
+```
+
+The unfaithful gloss swaps a necessary condition for a sufficient one — the same
+inversion the embedding channel rated 0.9796. Before the fidelity leg existed,
+both of these committed on the strength of the same sound proof.
+
+Two observations worth keeping rather than smoothing over. The faithful gloss
+scored 0.69 and 0.61 on two runs of the same pair: real glosses land far closer
+to the 0.6 floor than the 0.77–0.98 of the authored set, so the margin is
+thinner than the probe suggests, and the floor deserves calibration against
+glosses collected from real sessions. The judgment also varies run to run, so a
+number near the floor should be treated as near the floor, not as a verdict.
+
 ## Limits
 
 Eighteen authored pairs, written by the same agent that ran the challenger,

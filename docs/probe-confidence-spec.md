@@ -8,12 +8,20 @@
 > author supplies about its own output cannot verify that output, so counting it
 > as a gate leg overstated the gate's independence; it is now recorded as
 > `reported_confidence` and reported back as calibration by `session_status`.
-> That does not settle this spec — it sharpens the question it should answer.
-> A probe-derived confidence is a better estimator than a verbalized one, but it
-> is still the same system reporting on itself, so the open decision is whether
-> it earns a gate leg or belongs where the verbalized number now sits: measured
-> against outcomes rather than trusted at commit time. The calibration readout
-> is the place to settle that empirically.
+> That does not retire this spec; it relocates where its output lands.
+>
+> **Decision (2026-09-20, Ty): measured, not trusted.** A probe-derived
+> confidence does not earn a gate leg. However good an estimator is, it is still
+> the system reporting on itself, and a self-report cannot verify the output that
+> produced it. The probe's number goes where the verbalized number now sits —
+> recorded, and compared against what happened to the claim.
+>
+> `commit_claim` therefore takes `confidence_source` alongside
+> `reported_confidence`, and `session_status` groups calibration by it. That
+> makes this spec's central claim (ECE 0.044 for probes against 0.093 for
+> verbalized) checkable on real claims in this system rather than cited from a
+> paper: build the probe, commit with `confidence_source: "probe"`, and read the
+> two groups against subsequent refutations.
 
 ## Problem
 

@@ -41,7 +41,11 @@ it. An unmeasured fidelity counts as a failed check, never a passed one.
 The model's own stated confidence is recorded in the audit trail and reported
 back as calibration, but it is **not** a gate condition. A number the author
 supplies about its own output cannot verify that output, and counting it as a
-check made the gate look more independent than it was.
+check made the gate look more independent than it was. Measured, not trusted:
+`commit_claim` also records which estimator produced that number, and
+`session_status` groups calibration by estimator, so a better one — an
+activation probe, say — has to demonstrate itself on real claims instead of
+being asserted.
 
 Everything is recorded. Every assertion, proof, refusal, and recovery lands in
 an audit trail, so "how do we know this?" always has a checkable answer.

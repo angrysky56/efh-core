@@ -637,15 +637,26 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
               "about your own output cannot verify that output. session_status reports how your " +
               "stated confidence has compared with subsequent refutations.",
           ),
+        confidence_source: z
+          .string()
+          .min(1)
+          .max(40)
+          .default("verbalized")
+          .describe(
+            "Which estimator produced that number, e.g. verbalized or probe. Calibration is " +
+              "grouped by this, so a better estimator can be demonstrated on real claims rather " +
+              "than asserted.",
+          ),
       },
     },
-    async ({ claim_id, reported_confidence }) => {
+    async ({ claim_id, reported_confidence, confidence_source }) => {
       const outcome = store.commitClaim(
         db,
         claim_id,
         reported_confidence,
         state.closure_status,
         lastRecovery(),
+        confidence_source,
       );
       return text(outcome);
     },

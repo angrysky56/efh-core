@@ -157,6 +157,8 @@ export function commitClaim(
   reportedConfidence: number,
   closureStatus: ClosureStatus,
   recovery?: RecoveryRecommendation,
+  /** Which estimator produced reportedConfidence, so estimators can be compared. */
+  confidenceSource: string = "verbalized",
 ): CommitOutcome {
   const claim = getClaim(db, claimId);
   if (!claim) throw new Error(`Claim ${claimId} does not exist`);
@@ -204,7 +206,7 @@ export function commitClaim(
     db.prepare(
       "UPDATE claims SET status = 'committed', updated_at = datetime('now') WHERE id = ?",
     ).run(claimId);
-    audit(db, "gate", "commit", claimId, { reportedConfidence, closureStatus, gate });
+    audit(db, "gate", "commit", claimId, { reportedConfidence, confidenceSource, closureStatus, gate });
     return {
       committed: true,
       claim_id: claimId,
@@ -228,7 +230,7 @@ export function commitClaim(
         : `fidelity ${fidelity.toFixed(4)} < ${FIDELITY_MIN}: the formalization may not say what the claim says — reformalize`,
     );
   }
-  audit(db, "gate", "commit_refused", claimId, { failures, reportedConfidence, gate });
+  audit(db, "gate", "commit_refused", claimId, { failures, reportedConfidence, confidenceSource, gate });
   return {
     committed: false,
     claim_id: claimId,
@@ -322,37 +324,52 @@ export function reportedConfidenceCalibration(
   commits: number;
   mean_reported: number | null;
   later_refuted: number;
+  by_source: Record<string, { commits: number; mean_reported: number; later_refuted: number }>;
   note: string;
 } {
   const rows = db
     .prepare("SELECT claim_id, detail FROM audit WHERE actor = 'gate' AND action = 'commit'")
     .all() as Array<{ claim_id: number | null; detail: string | null }>;
-  const stated: Array<{ claimId: number; value: number }> = [];
+  const stated: Array<{ claimId: number; value: number; source: string }> = [];
   for (const r of rows) {
     if (r.claim_id === null || !r.detail) continue;
     try {
-      const parsed = JSON.parse(r.detail) as { reportedConfidence?: number; confidenceScore?: number };
+      const parsed = JSON.parse(r.detail) as {
+        reportedConfidence?: number;
+        confidenceScore?: number;
+        confidenceSource?: string;
+      };
       const value = parsed.reportedConfidence ?? parsed.confidenceScore;
-      if (typeof value === "number") stated.push({ claimId: r.claim_id, value });
+      if (typeof value === "number") {
+        stated.push({ claimId: r.claim_id, value, source: parsed.confidenceSource ?? "verbalized" });
+      }
     } catch {
       // A malformed audit row is skipped, never guessed at.
     }
   }
   if (stated.length === 0) {
-    return { commits: 0, mean_reported: null, later_refuted: 0, note: "no commits recorded yet" };
+    return { commits: 0, mean_reported: null, later_refuted: 0, by_source: {}, note: "no commits recorded yet" };
   }
   const refuted = new Set(
     (db.prepare("SELECT id FROM claims WHERE status = 'refuted'").all() as Array<{ id: number }>).map((c) => c.id),
   );
-  const laterRefuted = stated.filter((s) => refuted.has(s.claimId)).length;
-  const mean = stated.reduce((sum, s) => sum + s.value, 0) / stated.length;
+  const round = (n: number) => Math.round(n * 10000) / 10000;
+  const summarize = (xs: typeof stated) => ({
+    commits: xs.length,
+    mean_reported: round(xs.reduce((sum, x) => sum + x.value, 0) / xs.length),
+    later_refuted: xs.filter((x) => refuted.has(x.claimId)).length,
+  });
+  const by_source: Record<string, { commits: number; mean_reported: number; later_refuted: number }> = {};
+  for (const source of new Set(stated.map((x) => x.source))) {
+    by_source[source] = summarize(stated.filter((x) => x.source === source));
+  }
+  const all = summarize(stated);
   return {
-    commits: stated.length,
-    mean_reported: Math.round(mean * 10000) / 10000,
-    later_refuted: laterRefuted,
+    ...all,
+    by_source,
     note:
       stated.length < minSample
         ? `${stated.length} commits is too few to read as calibration (needs about ${minSample}); this is a record, not a trend`
-        : "stated confidence against subsequent refutation; a high mean with nonzero refutations means the self-reports run ahead of the evidence",
+        : "stated confidence against subsequent refutation, grouped by estimator; a high mean with nonzero refutations means the self-reports run ahead of the evidence",
   };
 }

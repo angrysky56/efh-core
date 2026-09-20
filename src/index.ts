@@ -11,12 +11,28 @@
  * computation and persistence.
  */
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { defaultDbPath, openDb } from "./db.js";
 import { Embedder } from "./embeddings.js";
 import { loadState, saveState } from "./enforcer/state.js";
 import { registerTools } from "./tools.js";
+
+// An MCP host may launch this server with only a minimal environment, so a key
+// exported from a shell profile never reaches it. Real environment variables
+// always win; a project .env fills what is missing, and a missing or unreadable
+// file is ignored.
+const envFile = join(dirname(dirname(fileURLToPath(import.meta.url))), ".env");
+if (existsSync(envFile)) {
+  try {
+    process.loadEnvFile(envFile);
+  } catch {
+    // An unreadable .env must not stop the server; configuration is reported by session_status.
+  }
+}
 
 async function main(): Promise<void> {
   const dbPath = defaultDbPath();

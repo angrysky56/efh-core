@@ -353,7 +353,25 @@ check(
 
 // --- the stated confidence is measurable, not ornamental -------------------------
 {
+  // A second estimator on a comparable claim: calibration is grouped, so a better
+  // estimator has to show itself on real claims rather than be asserted.
+  const probed = store.assertClaim(db, "a claim committed with a probe estimate", 0.9, "smoke");
+  store.recordVerification(db, probed.id, 1.0, false, "smoke: proved");
+  store.saveFormalization(db, {
+    claim_id: probed.id, axioms: ["(declare-const p Bool)", "(assert p)"], conjecture: "p",
+    backend: "z3", result: "proved", proof_confidence: 1, fidelity: 0.95,
+    fidelity_method: "judgment", gloss: "p holds given that p is asserted", strengthenings: null,
+  });
+  state.resetAdmm(); // sanctioned de-escalation -> KERNEL1
+  const probeCommit = store.commitClaim(db, probed.id, 0.62, state.closure_status, undefined, "probe");
+  check("a probe-sourced commit passes the same three legs", probeCommit.committed === true, probeCommit.reason);
+
   const cal = store.reportedConfidenceCalibration(db);
+  check(
+    "calibration separates estimators instead of pooling them",
+    cal.by_source.probe?.commits === 1 && cal.by_source.verbalized?.commits >= 2,
+    JSON.stringify(cal.by_source),
+  );
   check(
     "stated confidence is recorded against what happened to the claim",
     cal.commits >= 2 && typeof cal.mean_reported === "number" && cal.later_refuted >= 0,
