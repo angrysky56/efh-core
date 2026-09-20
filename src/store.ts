@@ -1,8 +1,15 @@
 /**
  * Claim store, audit trail, and the commit gate.
  *
- * The commit rule (structural, not advisory — from EFHF agent instructions):
- *   commit ⇔ proof_confidence ≥ 0.7 ∧ confidence_score ≥ 0.7 ∧ status = KERNEL1
+ * The commit rule (structural, not advisory):
+ *   commit ⇔ proof_confidence ≥ 0.7 ∧ fidelity ≥ 0.6 ∧ status = KERNEL1
+ *
+ * Each leg is something the reasoner does not control: a prover result, an
+ * independent comparison of the formalization against the claim, and the
+ * monitor's own state. The reasoner's stated confidence is recorded in the
+ * audit trail for calibration, and is deliberately NOT a leg — a number the
+ * author supplies about its own output cannot verify that output, and counting
+ * it as a check inflated the gate's apparent independence.
  * Refusals are normal results (committed:false + reason + recovery
  * recommendation), and every attempt is audited either way.
  */
@@ -11,6 +18,9 @@ import type Database from "better-sqlite3";
 import type { Claim, ClosureStatus, Formalization, RecoveryRecommendation } from "./types.js";
 
 const MIN_CONFIDENCE = Number(process.env.EFH_COMMIT_MIN_CONFIDENCE ?? 0.7);
+const FIDELITY_MIN = Number(process.env.EFH_FIDELITY_MIN ?? 0.6);
+/** The fidelity leg can be disabled, but never quietly: the gate says so in every outcome. */
+const FIDELITY_GATE = (process.env.EFH_GATE_FIDELITY ?? "on").toLowerCase() !== "off";
 
 export function audit(
   db: Database.Database,
@@ -121,9 +131,16 @@ export interface CommitOutcome {
   closure_status: ClosureStatus;
   gate: {
     proof_confidence_ok: boolean;
-    confidence_score_ok: boolean;
     kernel1_ok: boolean;
+    /** False when the formalization was not measured, or measured below the floor. */
+    fidelity_ok: boolean;
     min_confidence: number;
+    fidelity: number | null;
+    fidelity_method: string | null;
+    fidelity_min: number;
+    /** "off" means the fidelity leg was disabled for this commit, and says so. */
+    fidelity_gate: "on" | "off";
+    fidelity_caveat?: string;
   };
   recovery_recommendation?: RecoveryRecommendation;
 }
@@ -131,11 +148,13 @@ export interface CommitOutcome {
 /**
  * THE GATE. All three conditions must hold; anything else is a refusal.
  * A refusal is not an error — it is the consistency check working.
+ * The reasoner's stated confidence is recorded, not counted.
  */
 export function commitClaim(
   db: Database.Database,
   claimId: number,
-  confidenceScore: number,
+  /** Recorded for calibration; never a gate condition. */
+  reportedConfidence: number,
   closureStatus: ClosureStatus,
   recovery?: RecoveryRecommendation,
 ): CommitOutcome {
@@ -143,11 +162,31 @@ export function commitClaim(
   if (!claim) throw new Error(`Claim ${claimId} does not exist`);
 
   const pc = claim.proof_confidence ?? 0;
+  // The formalization that carried the proof. A proof establishes that the
+  // conjecture follows from the axioms; it says nothing about whether those
+  // formulas mean what the claim means. That is what fidelity measures, so it
+  // belongs in the gate rather than in a warning nobody has to read.
+  const formalization = db
+    .prepare("SELECT fidelity, fidelity_method, gloss FROM formalizations WHERE claim_id = ? ORDER BY id DESC LIMIT 1")
+    .get(claimId) as { fidelity: number | null; fidelity_method: string | null; gloss: string | null } | undefined;
+  const fidelity = formalization?.fidelity ?? null;
+  const fidelityMethod = formalization?.fidelity_method ?? null;
   const gate = {
     proof_confidence_ok: pc >= MIN_CONFIDENCE,
-    confidence_score_ok: confidenceScore >= MIN_CONFIDENCE,
     kernel1_ok: closureStatus === "KERNEL1",
+    // An unmeasured comparison never counts as a passed comparison.
+    fidelity_ok: !FIDELITY_GATE || (fidelity !== null && fidelity >= FIDELITY_MIN),
     min_confidence: MIN_CONFIDENCE,
+    fidelity,
+    fidelity_method: fidelityMethod,
+    fidelity_min: FIDELITY_MIN,
+    fidelity_gate: FIDELITY_GATE ? ("on" as const) : ("off" as const),
+    ...(fidelityMethod === "embedding"
+      ? {
+          fidelity_caveat:
+            "measured by embedding similarity, which reads topical overlap and cannot see negation or quantifier scope — set EFH_JUDGE=jev for a typed judgment",
+        }
+      : {}),
   };
 
   if (claim.status === "refuted") {
@@ -161,11 +200,11 @@ export function commitClaim(
     };
   }
 
-  if (gate.proof_confidence_ok && gate.confidence_score_ok && gate.kernel1_ok) {
+  if (gate.proof_confidence_ok && gate.kernel1_ok && gate.fidelity_ok) {
     db.prepare(
       "UPDATE claims SET status = 'committed', updated_at = datetime('now') WHERE id = ?",
     ).run(claimId);
-    audit(db, "gate", "commit", claimId, { confidenceScore, closureStatus, gate });
+    audit(db, "gate", "commit", claimId, { reportedConfidence, closureStatus, gate });
     return {
       committed: true,
       claim_id: claimId,
@@ -179,13 +218,17 @@ export function commitClaim(
   if (!gate.proof_confidence_ok) {
     failures.push(`proof_confidence ${pc.toFixed(2)} < ${MIN_CONFIDENCE} (verify the claim first)`);
   }
-  if (!gate.confidence_score_ok) {
-    failures.push(`confidence_score ${confidenceScore.toFixed(2)} < ${MIN_CONFIDENCE}`);
-  }
   if (!gate.kernel1_ok) {
     failures.push(`closure_status is ${closureStatus}, not KERNEL1`);
   }
-  audit(db, "gate", "commit_refused", claimId, { failures, gate });
+  if (!gate.fidelity_ok) {
+    failures.push(
+      fidelity === null
+        ? "formalization fidelity unmeasured (verify with a gloss); an unmeasured check never counts as a passed check"
+        : `fidelity ${fidelity.toFixed(4)} < ${FIDELITY_MIN}: the formalization may not say what the claim says — reformalize`,
+    );
+  }
+  audit(db, "gate", "commit_refused", claimId, { failures, reportedConfidence, gate });
   return {
     committed: false,
     claim_id: claimId,
@@ -207,12 +250,13 @@ export function saveFormalization(
     result: string;
     proof_confidence: number | null;
     fidelity: number | null;
+    fidelity_method: string | null;
     gloss: string | null;
     strengthenings: string[] | null;
   },
 ): void {
   db.prepare(
-    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     f.claim_id,
     JSON.stringify(f.axioms),
@@ -221,6 +265,7 @@ export function saveFormalization(
     f.result,
     f.proof_confidence,
     f.fidelity,
+    f.fidelity_method,
     f.gloss,
     f.strengthenings ? JSON.stringify(f.strengthenings) : null,
   );
@@ -259,4 +304,55 @@ export function getAuditTrail(
   return db.prepare("SELECT * FROM audit ORDER BY id DESC LIMIT ?").all(capped) as Array<
     Record<string, unknown>
   >;
+}
+
+/**
+ * Calibration of the reasoner's stated confidence against what happened next.
+ *
+ * The stated number is not a gate condition, so this is its only job: it makes
+ * self-reports checkable instead of decorative. A claim that was committed at
+ * high stated confidence and later refuted is exactly the case worth counting.
+ * With few commits the numbers mean nothing, and this says so rather than
+ * implying a trend.
+ */
+export function reportedConfidenceCalibration(
+  db: Database.Database,
+  minSample = 30,
+): {
+  commits: number;
+  mean_reported: number | null;
+  later_refuted: number;
+  note: string;
+} {
+  const rows = db
+    .prepare("SELECT claim_id, detail FROM audit WHERE actor = 'gate' AND action = 'commit'")
+    .all() as Array<{ claim_id: number | null; detail: string | null }>;
+  const stated: Array<{ claimId: number; value: number }> = [];
+  for (const r of rows) {
+    if (r.claim_id === null || !r.detail) continue;
+    try {
+      const parsed = JSON.parse(r.detail) as { reportedConfidence?: number; confidenceScore?: number };
+      const value = parsed.reportedConfidence ?? parsed.confidenceScore;
+      if (typeof value === "number") stated.push({ claimId: r.claim_id, value });
+    } catch {
+      // A malformed audit row is skipped, never guessed at.
+    }
+  }
+  if (stated.length === 0) {
+    return { commits: 0, mean_reported: null, later_refuted: 0, note: "no commits recorded yet" };
+  }
+  const refuted = new Set(
+    (db.prepare("SELECT id FROM claims WHERE status = 'refuted'").all() as Array<{ id: number }>).map((c) => c.id),
+  );
+  const laterRefuted = stated.filter((s) => refuted.has(s.claimId)).length;
+  const mean = stated.reduce((sum, s) => sum + s.value, 0) / stated.length;
+  return {
+    commits: stated.length,
+    mean_reported: Math.round(mean * 10000) / 10000,
+    later_refuted: laterRefuted,
+    note:
+      stated.length < minSample
+        ? `${stated.length} commits is too few to read as calibration (needs about ${minSample}); this is a record, not a trend`
+        : "stated confidence against subsequent refutation; a high mean with nonzero refutations means the self-reports run ahead of the evidence",
+  };
 }

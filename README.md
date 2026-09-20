@@ -28,8 +28,20 @@ control:
    graded levels (think green → yellow → orange → red) before the
    inconsistency can contaminate anything.
 4. **A gate.** A claim is committed to the knowledge base only when three
-   conditions hold at once: the proof succeeded, confidence is high, and the
-   monitor shows green. A refusal is not an error — it is the system working.
+   conditions hold at once: the proof succeeded, the formalization was measured
+   to say what the claim says, and the monitor shows green. A refusal is not an
+   error — it is the system working.
+
+Each leg is something the model does not control. The fidelity leg is there
+because a proof is narrower than it looks: it establishes that the conjecture
+follows from the axioms, and says nothing about whether those formulas mean
+what the claim meant. Encode the wrong thing and the prover will soundly prove
+it. An unmeasured fidelity counts as a failed check, never a passed one.
+
+The model's own stated confidence is recorded in the audit trail and reported
+back as calibration, but it is **not** a gate condition. A number the author
+supplies about its own output cannot verify that output, and counting it as a
+check made the gate look more independent than it was.
 
 Everything is recorded. Every assertion, proof, refusal, and recovery lands in
 an audit trail, so "how do we know this?" always has a checkable answer.
@@ -62,7 +74,22 @@ ethical triage.
   for the semantic channel, which lets the monitor recognize that two
   differently-worded statements are the same claim. Without it, set
   `EFH_SEMANTIC=off`; the system falls back to exact-match comparison and says
-  so in every report.
+  so in every report. Read the limits below before relying on it.
+- **Optional — a typed-judgment channel** (`EFH_JUDGE=jev` plus a provider
+  key). Embedding similarity reads topical overlap, so it cannot see the two
+  ways a formalization actually goes wrong. Measured on this repo's own model,
+  `nomic-embed-text` accepted 11 of 12 deliberately unfaithful glosses at the
+  0.6 gate, scoring "a proof is **necessary** for a commit" against "a proof is
+  **sufficient** for a commit" at 0.9796 — its highest fidelity of the run,
+  inverting this project's own commit rule. A typed judgment scored the same 18
+  pairs 18/18 and put that pair at 0.10. The same blindness affects the
+  monitor: measured pairwise, a direct contradiction ("the claim is verified" /
+  "the claim is not verified", 0.0962) sits closer than a paraphrase (0.0954),
+  so the contradiction detector cannot see a plain negation through the
+  embedding channel. Method and limits are reported in every fidelity result
+  and in `session_status`. The numbers, the labelled pairs and the runnable
+  comparison are in
+  **[experiments/fidelity-probe](experiments/fidelity-probe/README.md)**.
 - **Optional — Prover9/Mace4** (LADR) as an alternative proof backend.
 - **Optional — Isabelle** for the kernel-checked proof layer in `isabelle/`.
 - Any MCP client: Claude Desktop, Cowork, Claude Code, or anything speaking
@@ -120,7 +147,12 @@ yellow, and the gate refuses with the reason spelled out.
 | `OLLAMA_HOST`                 | embedding endpoint                         | `http://localhost:11434`         |
 | `EFH_EMBED_MODEL`             | embedding model                            | `nomic-embed-text`               |
 | `EFH_COMMIT_MIN_CONFIDENCE`   | gate threshold                             | `0.7`                            |
-| `EFH_FIDELITY_MIN`            | formalization-fidelity warning threshold   | `0.6`                            |
+| `EFH_FIDELITY_MIN`            | formalization-fidelity gate threshold      | `0.6`                            |
+| `EFH_GATE_FIDELITY`           | `on` / `off` — the fidelity leg of the gate (every outcome reports which) | `on` |
+| `EFH_JUDGE`                   | `jev` / `off` — typed-judgment channel for formalization fidelity | `off` |
+| `EFH_JUDGE_MONITOR`           | `on` / `off` — also route the monitor's text channel through the judge | `off` |
+| `EFH_JUDGE_PROVIDER`          | `typesafe` / `openrouter`                  | `typesafe`                       |
+| `EFH_JUDGE_MODEL`             | judgment model                             | provider's latest alias          |
 | `EFH_EPSILON_PRIMAL`          | monitor escalation threshold               | `0.15`                           |
 | `EFH_DUAL_WARNING`            | monitor pressure threshold                 | `5.0`                            |
 | `EFH_Z3_TIMEOUT_MS`           | prover timeout per check                   | `15000`                          |

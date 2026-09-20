@@ -1,0 +1,134 @@
+{
+  "model": "nomic-embed-text",
+  "host": "http://10.0.2.2:11434",
+  "measuredVia": "inline mirror of Embedder.distance (production module unavailable here: ERR_DLOPEN_FAILED)",
+  "threshold": 0.6,
+  "results": [
+    {
+      "id": "p01",
+      "category": "paraphrase",
+      "faithful": true,
+      "fidelity": 0.7914,
+      "accepted": true
+    },
+    {
+      "id": "p02",
+      "category": "paraphrase",
+      "faithful": true,
+      "fidelity": 0.9657,
+      "accepted": true
+    },
+    {
+      "id": "p03",
+      "category": "paraphrase",
+      "faithful": true,
+      "fidelity": 0.9201,
+      "accepted": true
+    },
+    {
+      "id": "p04",
+      "category": "contrapositive",
+      "faithful": true,
+      "fidelity": 0.9462,
+      "accepted": true
+    },
+    {
+      "id": "p05",
+      "category": "paraphrase",
+      "faithful": true,
+      "fidelity": 0.8236,
+      "accepted": true
+    },
+    {
+      "id": "p06",
+      "category": "de_morgan",
+      "faithful": true,
+      "fidelity": 0.7582,
+      "accepted": true
+    },
+    {
+      "id": "p07",
+      "category": "negation",
+      "faithful": false,
+      "fidelity": 0.9507,
+      "accepted": true
+    },
+    {
+      "id": "p08",
+      "category": "negation",
+      "faithful": false,
+      "fidelity": 0.9373,
+      "accepted": true
+    },
+    {
+      "id": "p09",
+      "category": "quantifier_scope",
+      "faithful": false,
+      "fidelity": 0.9249,
+      "accepted": true
+    },
+    {
+      "id": "p10",
+      "category": "quantifier_weaken",
+      "faithful": false,
+      "fidelity": 0.9671,
+      "accepted": true
+    },
+    {
+      "id": "p11",
+      "category": "quantifier_strengthen",
+      "faithful": false,
+      "fidelity": 0.927,
+      "accepted": true
+    },
+    {
+      "id": "p12",
+      "category": "converse",
+      "faithful": false,
+      "fidelity": 0.9303,
+      "accepted": true
+    },
+    {
+      "id": "p13",
+      "category": "inverse",
+      "faithful": false,
+      "fidelity": 0.9518,
+      "accepted": true
+    },
+    {
+      "id": "p14",
+      "category": "added_antecedent",
+      "faithful": false,
+      "fidelity": 0.9476,
+      "accepted": true
+    },
+    {
+      "id": "p15",
+      "category": "necessary_vs_sufficient",
+      "faithful": false,
+      "fidelity": 0.9796,
+      "accepted": true
+    },
+    {
+      "id": "p16",
+      "category": "negation_scope",
+      "faithful": false,
+      "fidelity": 0.8355,
+      "accepted": true
+    },
+    {
+      "id": "p17",
+      "category": "modality",
+      "faithful": false,
+      "fidelity": 0.9444,
+      "accepted": true
+    },
+    {
+      "id": "p18",
+      "category": "unrelated",
+      "faithful": false,
+      "fidelity": 0.422,
+      "accepted": false
+    }
+  ]
+}

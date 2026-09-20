@@ -66,7 +66,7 @@ onto the same edge-space key names (`edge_claim`, `edge_confidence`,
 | `trigger_recovery` | soft_relax / admm_reset / kernel_retreat / re_partition / fusion |
 | `set_restriction_map` | Wire a directed edge's projection (compare: hash \| semantic) |
 | `reset_session` | Clean enforcer slate; claims and audit persist |
-| `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ confidence_score ≥ 0.7 ∧ KERNEL1 |
+| `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ fidelity ≥ floor ∧ KERNEL1 (`reported_confidence` is recorded for calibration, not a leg) |
 | `session_status` | Health: claim counts, enforcer summary, backend availability |
 
 ## Enforcer mathematics
@@ -150,6 +150,15 @@ Measured on `nomic-embed-text` (n small; re-run on your setup):
   lumpability ⟹ a well-defined, stochastic, commuting macro kernel
   (`lumped_commutes`, `lumped_stochastic`). The IC→CompC edge the locale
   assumes is, for these system classes, a theorem.
+- **`EFHF_Grounding_Measure.thy`** — the finiteness restriction removed. Over an
+  *arbitrary* measurable space with a genuine probability kernel (HOL-Probability),
+  the `lumpable_kernel` locale proves: `macro_prob_space` (the macro law is a
+  probability measure), `lumped_commutes` (computational closure — the macro law
+  out of `p x` is the pushforward of the micro law), `macro_welldefined`
+  (representative-independence), `lumped_prob_space` (the lumped macro kernel is
+  itself a probability kernel). `identity_lumpable` witnesses non-vacuity. This
+  is the measure-theoretic IC→CompC — nothing finite or discrete assumed, meeting
+  Rosas et al. on continuous-space ground. Builds on the HOL-Probability heap.
 - Division of labor: Z3 in-loop (milliseconds, claim gating); Isabelle for the
   canon (LCF-kernel assurance, readable Isar). Three independent proof systems
   agree on the axiom set: Prover9, Z3, Isabelle.

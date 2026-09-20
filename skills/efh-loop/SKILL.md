@@ -34,9 +34,12 @@ hypothesized, not proven, to track closure. Say "verified within closure bounds,
    `{current_hypothesis, confidence_score, halt_flag, verified_claim?}`. Report your real
    confidence, not aspiration.
 5. **ENFORCE** — every 2–3 tool calls: `run_admm_cycle`, then `get_closure_status`.
-6. **COMMIT** — `commit_claim(claim_id, confidence_score)`. The gate enforces:
-   proof_confidence ≥ 0.7 ∧ confidence_score ≥ 0.7 ∧ status = KERNEL1. A refusal is the
-   system working — read the reason, do not retry blindly.
+6. **COMMIT** — `commit_claim(claim_id, reported_confidence)`. The gate enforces:
+   proof_confidence ≥ 0.7 ∧ formalization fidelity ≥ the floor ∧ status = KERNEL1.
+   Every leg is outside your control; `reported_confidence` is recorded for
+   calibration and does not affect the outcome, so state it honestly rather than
+   tactically. Verify with a `gloss` or fidelity stays unmeasured, which fails the
+   gate. A refusal is the system working — read the reason, do not retry blindly.
 7. **ITERATE** — refine from proof results; loop.
 
 Session start: `reset_session(confirm=true)`. Claims persist; enforcer state does not.

@@ -1,0 +1,188 @@
+{
+  "threshold": 0.6,
+  "embedder": "nomic-embed-text",
+  "jevModel": "jev-1.13.0",
+  "measuredVia": "inline mirror of Embedder.distance (production module unavailable here: ERR_DLOPEN_FAILED)",
+  "head": [
+    {
+      "id": "p01",
+      "category": "paraphrase",
+      "faithful": true,
+      "embedding": 0.7914,
+      "embedding_ok": true,
+      "jev": 0.95,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p02",
+      "category": "paraphrase",
+      "faithful": true,
+      "embedding": 0.9657,
+      "embedding_ok": true,
+      "jev": 0.77,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p03",
+      "category": "paraphrase",
+      "faithful": true,
+      "embedding": 0.9201,
+      "embedding_ok": true,
+      "jev": 0.96,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p04",
+      "category": "contrapositive",
+      "faithful": true,
+      "embedding": 0.9462,
+      "embedding_ok": true,
+      "jev": 0.97,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p05",
+      "category": "paraphrase",
+      "faithful": true,
+      "embedding": 0.8236,
+      "embedding_ok": true,
+      "jev": 0.79,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p06",
+      "category": "de_morgan",
+      "faithful": true,
+      "embedding": 0.7582,
+      "embedding_ok": true,
+      "jev": 0.98,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p07",
+      "category": "negation",
+      "faithful": false,
+      "embedding": 0.9507,
+      "embedding_ok": false,
+      "jev": 0.03,
+      "jev_ok": true,
+      "jev_relation": "contradicts"
+    },
+    {
+      "id": "p08",
+      "category": "negation",
+      "faithful": false,
+      "embedding": 0.9373,
+      "embedding_ok": false,
+      "jev": 0.05,
+      "jev_ok": true,
+      "jev_relation": "contradicts"
+    },
+    {
+      "id": "p09",
+      "category": "quantifier_scope",
+      "faithful": false,
+      "embedding": 0.9249,
+      "embedding_ok": false,
+      "jev": 0.04,
+      "jev_ok": true,
+      "jev_relation": "gloss_stronger"
+    },
+    {
+      "id": "p10",
+      "category": "quantifier_weaken",
+      "faithful": false,
+      "embedding": 0.9671,
+      "embedding_ok": false,
+      "jev": 0.07,
+      "jev_ok": true,
+      "jev_relation": "gloss_weaker"
+    },
+    {
+      "id": "p11",
+      "category": "quantifier_strengthen",
+      "faithful": false,
+      "embedding": 0.927,
+      "embedding_ok": false,
+      "jev": 0.05,
+      "jev_ok": true,
+      "jev_relation": "gloss_stronger"
+    },
+    {
+      "id": "p12",
+      "category": "converse",
+      "faithful": false,
+      "embedding": 0.9303,
+      "embedding_ok": false,
+      "jev": 0.05,
+      "jev_ok": true,
+      "jev_relation": "scope_differs"
+    },
+    {
+      "id": "p13",
+      "category": "inverse",
+      "faithful": false,
+      "embedding": 0.9518,
+      "embedding_ok": false,
+      "jev": 0.53,
+      "jev_ok": true,
+      "jev_relation": "equivalent"
+    },
+    {
+      "id": "p14",
+      "category": "added_antecedent",
+      "faithful": false,
+      "embedding": 0.9476,
+      "embedding_ok": false,
+      "jev": 0.06,
+      "jev_ok": true,
+      "jev_relation": "gloss_weaker"
+    },
+    {
+      "id": "p15",
+      "category": "necessary_vs_sufficient",
+      "faithful": false,
+      "embedding": 0.9796,
+      "embedding_ok": false,
+      "jev": 0.06,
+      "jev_ok": true,
+      "jev_relation": "scope_differs"
+    },
+    {
+      "id": "p16",
+      "category": "negation_scope",
+      "faithful": false,
+      "embedding": 0.8355,
+      "embedding_ok": false,
+      "jev": 0.05,
+      "jev_ok": true,
+      "jev_relation": "gloss_stronger"
+    },
+    {
+      "id": "p17",
+      "category": "modality",
+      "faithful": false,
+      "embedding": 0.9444,
+      "embedding_ok": false,
+      "jev": 0.08,
+      "jev_ok": true,
+      "jev_relation": "gloss_stronger"
+    },
+    {
+      "id": "p18",
+      "category": "unrelated",
+      "faithful": false,
+      "embedding": 0.422,
+      "embedding_ok": true,
+      "jev": 0.03,
+      "jev_ok": true,
+      "jev_relation": "unrelated"
+    }
+  ]
+}

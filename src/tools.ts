@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { Embedder } from "./embeddings.js";
+import { Judge, judgeEnabled } from "./judge.js";
 import { runFullCycle } from "./enforcer/admm.js";
 import {
   saveState,
@@ -66,6 +67,17 @@ function proofConfidence(r: VerifyResult): number {
 
 export function registerTools(server: McpServer, ctx: Ctx): void {
   const { db, embedder } = ctx;
+  const judge = new Judge();
+  /**
+   * The monitor's text channel answers "are these facets talking about the same
+   * proposition?", while disagreement about truth rides on the scalar channels
+   * (belief_score vs proof_confidence, and the inconsistency flags) — see
+   * test/calibrate.mjs. Routing it through the judge changes that question to
+   * "do these hold in the same situations?", which is a different design, not a
+   * bug fix, so it is a separate opt-in from the fidelity channel.
+   */
+  const monitorJudge = () => judgeEnabled() && (process.env.EFH_JUDGE_MONITOR ?? "off").toLowerCase() === "on";
+  const comparator = () => (monitorJudge() ? judge : embedder);
   let state = ctx.state;
   let lastCycle: CycleReport | null = null;
 
@@ -80,28 +92,70 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
   };
 
   /**
-   * Formalization fidelity: 1 − embedding distance between claim text and the
-   * independently written gloss. Never fails the verification — an unmeasured
-   * fidelity is reported as such (fail-loud on the measurement, not the proof).
+   * Formalization fidelity: does the gloss say what the claim says?
+   *
+   * With EFH_JUDGE=jev this is a typed judgment (the probability that the two
+   * hold in exactly the same situations). Otherwise it is 1 − embedding
+   * distance, which reads topical overlap and cannot see negation or
+   * quantifier scope — measured on this repo's own model, that channel
+   * accepted 11 of 12 deliberately unfaithful glosses (experiments/fidelity-probe).
+   * The method is returned and stored, so a number is never read out of context.
+   *
+   * Never fails the verification — an unmeasured fidelity is reported as such
+   * (fail-loud on the measurement, not the proof). The commit gate is where an
+   * unmeasured or failing fidelity stops a claim.
    */
   const measureFidelity = async (
     claimText: string | undefined,
     gloss: string | undefined,
-  ): Promise<{ fidelity: number | null; fidelity_warning?: true; fidelity_note?: string }> => {
+  ): Promise<{
+    fidelity: number | null;
+    fidelity_method?: "judgment" | "embedding";
+    fidelity_relation?: string;
+    fidelity_split?: true;
+    fidelity_warning?: true;
+    fidelity_note?: string;
+  }> => {
     if (!claimText) return { fidelity: null };
     if (!gloss) {
       return { fidelity: null, fidelity_note: "no gloss supplied — formalization fidelity unmeasured" };
     }
-    try {
-      const d = await embedder.distance(claimText, gloss);
-      const fidelity = Math.round((1 - d) * 10000) / 10000;
-      return fidelity < FIDELITY_MIN
+    const below = (fidelity: number, method: "judgment" | "embedding", extra: Record<string, unknown>) =>
+      fidelity < FIDELITY_MIN
         ? {
             fidelity,
-            fidelity_warning: true,
+            fidelity_method: method,
+            ...extra,
+            fidelity_warning: true as const,
             fidelity_note: `fidelity ${fidelity} < ${FIDELITY_MIN}: the formalization may not say what the claim says — reformalize`,
           }
-        : { fidelity };
+        : { fidelity, fidelity_method: method, ...extra };
+    if (judgeEnabled()) {
+      try {
+        const j = await judge.equivalence(claimText, gloss);
+        return below(j.same_truth_conditions, "judgment", {
+          fidelity_relation: j.relation,
+          // Two independent views of one pair; a split is a hard case, not a verdict.
+          ...(j.split
+            ? {
+                fidelity_split: true as const,
+                fidelity_note_split: `the relation label (${j.relation}) and the truth-condition score disagree — treat this formalization as unsettled and reformalize or check it by hand`,
+              }
+            : {}),
+        });
+      } catch (err) {
+        return {
+          fidelity: null,
+          fidelity_note: `fidelity unmeasured: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+    try {
+      const d = await embedder.distance(claimText, gloss);
+      return below(Math.round((1 - d) * 10000) / 10000, "embedding", {
+        fidelity_caveat:
+          "embedding similarity reads topical overlap and cannot see negation or quantifier scope; set EFH_JUDGE=jev for a typed judgment",
+      });
     } catch (err) {
       return {
         fidelity: null,
@@ -242,6 +296,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           result: result.result,
           proof_confidence: pc,
           fidelity: fid.fidelity,
+          fidelity_method: fid.fidelity_method ?? null,
           gloss: gloss ?? null,
           strengthenings: strengthenings ?? null,
         });
@@ -321,6 +376,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           result: result.result,
           proof_confidence: pc,
           fidelity: fid.fidelity,
+          fidelity_method: fid.fidelity_method ?? null,
           gloss: gloss ?? null,
           strengthenings: strengthenings ?? null,
         });
@@ -387,7 +443,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
       inputSchema: {},
     },
     async () => {
-      const report = await runFullCycle(state, embedder);
+      const report = await runFullCycle(state, comparator());
       lastCycle = report;
       persist();
       return text(report);
@@ -492,7 +548,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         }
         case "fusion": {
           state.resetAdmm();
-          const report = await runFullCycle(state, embedder);
+          const report = await runFullCycle(state, comparator());
           lastCycle = report;
           persist();
           return text({ strategy, reintegration_cycle: report });
@@ -565,19 +621,29 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
       description:
         "Commit a claim to the world model. THE GATE — all three must hold: " +
         "proof_confidence ≥ 0.7 (from a verify call bound to this claim), " +
-        "confidence_score ≥ 0.7 (your own, supplied here, recorded in audit), " +
-        "closure_status = KERNEL1. A refusal is a normal result with the reason and a " +
-        "recovery recommendation — it is the consistency check working.",
+        "formalization fidelity ≥ the floor (the encoding was measured to say what the " +
+        "claim says; unmeasured counts as failed), closure_status = KERNEL1. " +
+        "Every leg is something you do not control. A refusal is a normal result with the " +
+        "reason and a recovery recommendation — it is the consistency check working.",
       inputSchema: {
         claim_id: z.number().int(),
-        confidence_score: z.number().min(0).max(1).describe("The reasoner's own confidence"),
+        reported_confidence: z
+          .number()
+          .min(0)
+          .max(1)
+          .describe(
+            "Your own confidence. RECORDED IN THE AUDIT TRAIL FOR CALIBRATION, NOT A GATE " +
+              "CONDITION: it does not affect whether this commit succeeds. A number you supply " +
+              "about your own output cannot verify that output. session_status reports how your " +
+              "stated confidence has compared with subsequent refutations.",
+          ),
       },
     },
-    async ({ claim_id, confidence_score }) => {
+    async ({ claim_id, reported_confidence }) => {
       const outcome = store.commitClaim(
         db,
         claim_id,
-        confidence_score,
+        reported_confidence,
         state.closure_status,
         lastRecovery(),
       );
@@ -618,10 +684,18 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           z3: "in-process (lazy WASM init on first verification call)",
           prover9_available: prover9,
           ollama,
-          semantic_channel: (process.env.EFH_SEMANTIC ?? "on").toLowerCase() !== "off" ? "on" : "off",
+          semantic_channel:
+            (process.env.EFH_SEMANTIC ?? "on").toLowerCase() === "off"
+              ? "off (hash fallback)"
+              : monitorJudge()
+                ? "typed judgment — compares truth conditions, not just claim identity"
+                : "embedding — claim identity only; truth disagreement rides on the scalar channels",
+          judge: judge.probe(),
         },
         commit_min_confidence: Number(process.env.EFH_COMMIT_MIN_CONFIDENCE ?? 0.7),
         fidelity_min: FIDELITY_MIN,
+        gate_legs: ["proof_confidence", "fidelity", "closure_status"],
+        reported_confidence: store.reportedConfidenceCalibration(db),
       });
     },
   );

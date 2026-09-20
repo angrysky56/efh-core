@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS formalizations (
   result TEXT NOT NULL,
   proof_confidence REAL,
   fidelity REAL,
+  fidelity_method TEXT,
   gloss TEXT,
   strengthenings TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -90,6 +91,11 @@ function migrate(db: Database.Database): void {
   const cols = db.prepare("PRAGMA table_info(formalizations)").all() as Array<{ name: string }>;
   if (!cols.some((c) => c.name === "strengthenings")) {
     db.exec("ALTER TABLE formalizations ADD COLUMN strengthenings TEXT");
+  }
+  // Which channel produced the fidelity number: the gate reports it, because
+  // "embedding" means topical overlap only.
+  if (!cols.some((c) => c.name === "fidelity_method")) {
+    db.exec("ALTER TABLE formalizations ADD COLUMN fidelity_method TEXT");
   }
 }
 

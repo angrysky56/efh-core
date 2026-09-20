@@ -1,0 +1,31 @@
+{
+  "capability": "formalization_fidelity",
+  "version": 1,
+  "hash": "26c00931d8746621f44e92fc050a5eeab18f8efb3055048b9444e5cb58a4b635",
+  "provider": "typesafe",
+  "requestedModel": "jev-latest",
+  "resolvedModel": "jev-1.13.0",
+  "runIds": ["90703d06-294e-45b5-827f-ed52bc79434d", "b88f5ac9-70a3-48c3-9178-61eb5729c776"],
+  "threshold": 0.6,
+  "calls": 18,
+  "results": [
+    {"id":"p01","relation":"equivalent","relation_confidence":0.97,"same_truth_conditions":0.95},
+    {"id":"p02","relation":"equivalent","relation_confidence":0.85,"same_truth_conditions":0.77},
+    {"id":"p03","relation":"equivalent","relation_confidence":0.96,"same_truth_conditions":0.96},
+    {"id":"p04","relation":"equivalent","relation_confidence":1.0,"same_truth_conditions":0.97},
+    {"id":"p05","relation":"equivalent","relation_confidence":0.81,"same_truth_conditions":0.79},
+    {"id":"p06","relation":"equivalent","relation_confidence":1.0,"same_truth_conditions":0.98},
+    {"id":"p07","relation":"contradicts","relation_confidence":0.98,"same_truth_conditions":0.03},
+    {"id":"p08","relation":"contradicts","relation_confidence":0.99,"same_truth_conditions":0.05},
+    {"id":"p09","relation":"gloss_stronger","relation_confidence":0.61,"same_truth_conditions":0.04},
+    {"id":"p10","relation":"gloss_weaker","relation_confidence":0.99,"same_truth_conditions":0.07},
+    {"id":"p11","relation":"gloss_stronger","relation_confidence":0.90,"same_truth_conditions":0.05},
+    {"id":"p12","relation":"scope_differs","relation_confidence":0.56,"same_truth_conditions":0.05},
+    {"id":"p13","relation":"equivalent","relation_confidence":0.86,"same_truth_conditions":0.53},
+    {"id":"p14","relation":"gloss_weaker","relation_confidence":0.77,"same_truth_conditions":0.06},
+    {"id":"p15","relation":"scope_differs","relation_confidence":0.60,"same_truth_conditions":0.06},
+    {"id":"p16","relation":"gloss_stronger","relation_confidence":0.89,"same_truth_conditions":0.05},
+    {"id":"p17","relation":"gloss_stronger","relation_confidence":0.97,"same_truth_conditions":0.08},
+    {"id":"p18","relation":"unrelated","relation_confidence":1.0,"same_truth_conditions":0.03}
+  ]
+}

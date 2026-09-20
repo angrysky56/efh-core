@@ -1,0 +1,18 @@
+Building HOL-Analysis ...
+Finished HOL-Analysis (0:06:48 elapsed time, 0:38:47 cpu time, factor 5.69)
+Building HOL-Probability ...
+Finished HOL-Probability (0:01:10 elapsed time, 0:05:55 cpu time, factor 5.06)
+Building EFHF ...
+EFHF FAILED (see also "isabelle build_log -H Error EFHF")
+*** Failed to refine any pending goal
+*** At command "by" (line 138 of "~/Repositories/ai_workspace/efh-core/isabelle/EFHF_Grounding_Measure.thy")
+*** Failed to finish proof (line 116 of "~/Repositories/ai_workspace/efh-core/isabelle/EFHF_Grounding_Measure.thy"):
+*** goal (1 subgoal):
+***  1. ??x. x ? space M ? lumped (p x) = macro x; x ? space M; y ? space M;
+***      p x = p y?
+***     ? macro y =
+***        macro
+***         x
+*** At command "by" (line 116 of "~/Repositories/ai_workspace/efh-core/isabelle/EFHF_Grounding_Measure.thy")
+Unfinished session(s): EFHF
+0:08:24 elapsed time, 0:44:46 cpu time, factor 5.33

@@ -1,0 +1,24 @@
+{
+  "purpose": "Does the production fidelity gate (1 - embedding cosine distance, floor 0.6) separate faithful formalizations from unfaithful ones? Each pair is a claim as asserted and a gloss as a natural-language reading of a candidate formalization. Labels are authored before any measurement.",
+  "threshold": 0.6,
+  "pairs": [
+    {"id":"p01","category":"paraphrase","faithful":true,"claim":"Every prime greater than two is odd.","gloss":"If a number is prime and greater than 2, then it is not even."},
+    {"id":"p02","category":"paraphrase","faithful":true,"claim":"The server rejects a request when its token has expired.","gloss":"For any request, if that request's token is expired, the server rejects it."},
+    {"id":"p03","category":"paraphrase","faithful":true,"claim":"No student passed both exams.","gloss":"There is no student who passed exam A and also passed exam B."},
+    {"id":"p04","category":"contrapositive","faithful":true,"claim":"If the gate is open, the monitor is green.","gloss":"If the monitor is not green, the gate is not open."},
+    {"id":"p05","category":"paraphrase","faithful":true,"claim":"A commit requires both a successful proof and a confidence of at least 0.7.","gloss":"A claim is committed only if it has been proved and its confidence is greater than or equal to 0.7."},
+    {"id":"p06","category":"de_morgan","faithful":true,"claim":"It is not the case that both services are running.","gloss":"Either service A is not running, or service B is not running."},
+    {"id":"p07","category":"negation","faithful":false,"claim":"All ravens are black.","gloss":"No ravens are black."},
+    {"id":"p08","category":"negation","faithful":false,"claim":"The gate rejects a claim when its confidence is below the threshold.","gloss":"The gate accepts a claim when its confidence is below the threshold."},
+    {"id":"p09","category":"quantifier_scope","faithful":false,"claim":"Every student has an advisor.","gloss":"There is a single advisor who advises every student."},
+    {"id":"p10","category":"quantifier_weaken","faithful":false,"claim":"All ravens are black.","gloss":"Some ravens are black."},
+    {"id":"p11","category":"quantifier_strengthen","faithful":false,"claim":"Some primes are even.","gloss":"Every prime is even."},
+    {"id":"p12","category":"converse","faithful":false,"claim":"If it rains, the ground is wet.","gloss":"If the ground is wet, it rained."},
+    {"id":"p13","category":"inverse","faithful":false,"claim":"If a token is expired, the request is rejected.","gloss":"If a token is not expired, the request is not rejected."},
+    {"id":"p14","category":"added_antecedent","faithful":false,"claim":"If it rains, the game is cancelled.","gloss":"If it rains and the field floods, the game is cancelled."},
+    {"id":"p15","category":"necessary_vs_sufficient","faithful":false,"claim":"A successful proof is necessary for a commit.","gloss":"A successful proof is sufficient for a commit."},
+    {"id":"p16","category":"negation_scope","faithful":false,"claim":"Not every claim was verified.","gloss":"Every claim was left unverified."},
+    {"id":"p17","category":"modality","faithful":false,"claim":"The monitor may escalate to red.","gloss":"The monitor must escalate to red."},
+    {"id":"p18","category":"unrelated","faithful":false,"claim":"Every prime greater than two is odd.","gloss":"The audit trail records each refusal with a timestamp."}
+  ]
+}

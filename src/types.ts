@@ -103,6 +103,7 @@ export interface Formalization {
   proof_confidence: number | null;
   /** 1 − embedding distance between claim text and the independent gloss; null if unmeasured. */
   fidelity: number | null;
+  fidelity_method: string | null;
   gloss: string | null;
   /** JSON array of declared strengthenings (UF interpretations, bounds); null if faithful. */
   strengthenings: string | null;

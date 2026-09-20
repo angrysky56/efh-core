@@ -1,6 +1,7 @@
-session EFHF = HOL +
-  description "EFHF: kernel-checked Triadic Kernel locale + definitional grounding of closure over dynamics"
+session EFHF = "HOL-Probability" +
+  description "EFHF: kernel-checked Triadic Kernel locale + definitional grounding of closure over dynamics (finite and measure-theoretic)"
   options [document = false]
   theories
     EFHF
     EFHF_Grounding
+    EFHF_Grounding_Measure

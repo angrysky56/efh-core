@@ -20,8 +20,17 @@
  * default for exact-match channels and full back-compat.
  */
 
-import type { Embedder } from "../embeddings.js";
+
 import { semanticEnabled } from "../embeddings.js";
+
+/**
+ * Anything that can score how far apart two texts are, 0 (same) to 1 (at odds).
+ * Embedder measures topical overlap; Judge measures whether the two statements
+ * hold in the same situations. The monitor only needs the number.
+ */
+export interface TextComparator {
+  distance(a: string, b: string): Promise<number>;
+}
 import type {
   AgentState,
   CycleReport,
@@ -91,7 +100,7 @@ export function applyRestrictionMap(
 export async function coboundaryNorm(
   fromProj: Record<string, ProjectedValue>,
   toProj: Record<string, ProjectedValue>,
-  embedder: Embedder,
+  comparator: TextComparator,
 ): Promise<number> {
   const shared = Object.keys(fromProj).filter((k) => k in toProj);
   if (shared.length === 0) return 0.0;
@@ -104,7 +113,7 @@ export async function coboundaryNorm(
       sqSum += (a.v - b.v) ** 2;
     } else if (a.kind === "text" && b.kind === "text") {
       const w = Math.max(a.weight, b.weight);
-      const d = (await embedder.distance(a.s, b.s)) * w;
+      const d = (await comparator.distance(a.s, b.s)) * w;
       sqSum += d ** 2;
     } else {
       sqSum += 1.0; // projection-kind mismatch = full disagreement on this key
@@ -118,7 +127,7 @@ export async function admmStep(
   state: SessionState,
   fromAgent: string,
   toAgent: string,
-  embedder: Embedder,
+  comparator: TextComparator,
 ): Promise<EdgeReport> {
   const semanticOn = semanticEnabled();
   const edge = state.getOrCreateEdge(fromAgent, toAgent);
@@ -135,7 +144,7 @@ export async function admmStep(
   );
 
   // Steps 1 + 2: primal update + sheaf diffusion
-  const cbNorm = await coboundaryNorm(fromProj, toProj, embedder);
+  const cbNorm = await coboundaryNorm(fromProj, toProj, comparator);
   const prev = edge.last_coboundary;
 
   edge.primal_residuals.push(cbNorm);
@@ -250,7 +259,7 @@ function recommendRecovery(
 }
 
 /** Run one complete ADMM cycle over all registered agent pairs. */
-export async function runFullCycle(state: SessionState, embedder: Embedder): Promise<CycleReport> {
+export async function runFullCycle(state: SessionState, comparator: TextComparator): Promise<CycleReport> {
   const t0 = Date.now();
   state.admm_iterations += 1;
 
@@ -261,7 +270,7 @@ export async function runFullCycle(state: SessionState, embedder: Embedder): Pro
     if (!eid.includes(ARROW)) continue;
     const [fromA, toA] = eid.split(ARROW);
     if (agents.includes(fromA) && agents.includes(toA)) {
-      edgeReports.push(await admmStep(state, fromA, toA, embedder));
+      edgeReports.push(await admmStep(state, fromA, toA, comparator));
     }
   }
 

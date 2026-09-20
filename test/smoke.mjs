@@ -173,7 +173,21 @@ check("faithful proof uncapped", capStrengthened(1.0, undefined).pc === 1.0);
 store.recordVerification(db, claim.id, 1.0, false, "smoke: proved");
 state.resetAdmm(); // sanctioned de-escalation -> KERNEL1
 let outcome = store.commitClaim(db, claim.id, 0.9, state.closure_status);
-check("gate commits under KERNEL1 + confidence", outcome.committed === true, outcome.reason);
+check("gate commits under KERNEL1 + proof + fidelity", outcome.committed === true, outcome.reason);
+// The stated confidence is recorded, not counted: a commit that would pass the
+// three legs passes at any stated confidence, including zero.
+{
+  const twin = store.assertClaim(db, "same standing, no self-report", 0.9, "smoke");
+  store.recordVerification(db, twin.id, 1.0, false, "smoke: proved");
+  store.saveFormalization(db, {
+    claim_id: twin.id, axioms: ["(declare-const p Bool)", "(assert p)"], conjecture: "p",
+    backend: "z3", result: "proved", proof_confidence: 1, fidelity: 1,
+    fidelity_method: "judgment", gloss: "p holds given that p is asserted", strengthenings: null,
+  });
+  const zero = store.commitClaim(db, twin.id, 0.0, state.closure_status);
+  check("a self-reported confidence of zero does not block a verified commit", zero.committed === true, zero.reason);
+  check("the gate no longer has a self-report leg", !("confidence_score_ok" in zero.gate));
+}
 
 state.updateStatus("WEAK");
 outcome = store.commitClaim(db, c2.id, 0.9, state.closure_status);
@@ -191,6 +205,162 @@ check("audit trail populated", trail.length >= 3, `${trail.length} entries`);
 process.env.EFH_SEMANTIC = "on";
 const d = await embedder.distance("same text", "same text");
 check("identical-string semantic distance is 0 without model call", d === 0);
+
+// --- gate: the fidelity leg ------------------------------------------------------
+// A proof establishes that the conjecture follows from the axioms. It says nothing
+// about whether those formulas mean what the claim means, so fidelity is a gate
+// condition rather than a warning.
+const drifted = store.assertClaim(db, "a claim whose encoding drifted", 0.9, "smoke");
+store.recordVerification(db, drifted.id, 1.0, false, "smoke: proved");
+store.saveFormalization(db, {
+  claim_id: drifted.id,
+  axioms: ["(declare-const q Bool)", "(assert q)"],
+  conjecture: "q",
+  backend: "z3",
+  result: "proved",
+  proof_confidence: 1,
+  fidelity: 0.21,
+  fidelity_method: "judgment",
+  gloss: "an unrelated statement about kiln temperature",
+  strengthenings: null,
+});
+const drift = store.commitClaim(db, drifted.id, 0.95, state.closure_status);
+check(
+  "gate refuses a proved claim whose formalization is unfaithful",
+  drift.committed === false && drift.reason.includes("0.2100"),
+  drift.reason,
+);
+
+const unglossed = store.assertClaim(db, "a claim verified without a gloss", 0.9, "smoke");
+store.recordVerification(db, unglossed.id, 1.0, false, "smoke: proved");
+const unmeasured = store.commitClaim(db, unglossed.id, 0.95, state.closure_status);
+check(
+  "an unmeasured fidelity never counts as a passed check",
+  unmeasured.committed === false && unmeasured.reason.includes("unmeasured"),
+  unmeasured.reason,
+);
+check(
+  "gate reports the fidelity leg it applied",
+  unmeasured.gate.fidelity_gate === "on" && unmeasured.gate.fidelity === null,
+);
+
+// The escape hatch exists, but the outcome always says it was used.
+{
+  const { execFileSync } = await import("node:child_process");
+  const script = `
+    process.env.EFH_DB_PATH = ${JSON.stringify(DB)};
+    const { openDb } = await import("${join(process.cwd(), "dist/db.js")}");
+    const store = await import("${join(process.cwd(), "dist/store.js")}");
+    const db = openDb(${JSON.stringify(DB)});
+    const out = store.commitClaim(db, ${unglossed.id}, 0.95, "KERNEL1");
+    console.log(JSON.stringify({ committed: out.committed, gate: out.gate.fidelity_gate }));
+  `;
+  const raw = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    env: { ...process.env, EFH_GATE_FIDELITY: "off" },
+    encoding: "utf8",
+  });
+  const off = JSON.parse(raw.trim().split("\n").pop());
+  check(
+    "EFH_GATE_FIDELITY=off commits, and the outcome says the leg was off",
+    off.committed === true && off.gate === "off",
+    raw,
+  );
+}
+
+// --- judgment channel -------------------------------------------------------------
+{
+  const { Judge, JudgeUnavailableError } = await import("../dist/judge.js");
+  process.env.EFH_JUDGE = "jev";
+  process.env.EFH_JUDGE_PROVIDER = "typesafe";
+  process.env.TYPESAFE_API_KEY = "test-secret";
+
+  const reply = (relation, confidence, noul) =>
+    async () =>
+      new Response(
+        JSON.stringify({
+          model: "jev-1.13.0",
+          answers: {
+            relation: { type: "choice", choice: relation, confidence },
+            same_truth_conditions: { type: "noul", noul },
+          },
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+
+  const contradiction = new Judge(reply("contradicts", 0.98, 0.03));
+  check(
+    "a contradiction reads as near-total disagreement, not near-agreement",
+    (await contradiction.distance("the gate is open", "the gate is closed")) > 0.9,
+  );
+  const equivalent = new Judge(reply("equivalent", 1.0, 0.97));
+  check(
+    "a contrapositive reads as agreement",
+    (await equivalent.distance("if open then green", "if not green then not open")) < 0.1,
+  );
+
+  // Two independent views of one pair: where they disagree, the pair is hard.
+  const split = new Judge(reply("equivalent", 0.86, 0.53));
+  const judgment = await split.equivalence(
+    "if a token is expired the request is rejected",
+    "if a token is not expired the request is not rejected",
+  );
+  check("disagreement between the two questions is reported", judgment.split === true);
+  check("agreement between the two questions is not flagged", (await equivalent.equivalence("a", "b")).split === false);
+
+  // Fail-loud, and never echo the key back.
+  const denied = new Judge(async () => new Response("bad key test-secret", { status: 401 }));
+  let threw = null;
+  try {
+    await denied.equivalence("a", "b");
+  } catch (err) {
+    threw = err;
+  }
+  check(
+    "an unreachable judge throws instead of scoring",
+    threw instanceof JudgeUnavailableError && threw.message.includes("HTTP 401"),
+  );
+  check("the provider key is never echoed in an error", threw !== null && !threw.message.includes("test-secret"));
+
+  delete process.env.TYPESAFE_API_KEY;
+  let keyless = null;
+  try {
+    await new Judge(reply("equivalent", 1, 1)).equivalence("x", "y");
+  } catch (err) {
+    keyless = err;
+  }
+  check("a missing key is refused, not silently skipped", keyless instanceof JudgeUnavailableError);
+  delete process.env.EFH_JUDGE;
+}
+
+// --- what the monitor can see -----------------------------------------------------
+// The alarm is only as sharp as the comparator behind it. Measured against this
+// repo's own embedding model, "the claim is verified" and "the claim is not
+// verified" sit 0.0962 apart — closer than a paraphrase pair. See
+// experiments/fidelity-probe/README.md.
+{
+  const { coboundaryNorm } = await import("../dist/enforcer/admm.js");
+  const a = { belief: { kind: "text", s: "the claim is verified", weight: 1 } };
+  const b = { belief: { kind: "text", s: "the claim is not verified", weight: 1 } };
+  const topical = await coboundaryNorm(a, b, { distance: async () => 0.0962 });
+  const judged = await coboundaryNorm(a, b, { distance: async () => 0.97 });
+  check(
+    "a contradiction raises the alarm under judgment and not under topicality",
+    topical < 0.2 && judged > 0.9,
+    `topical ${topical}, judged ${judged}`,
+  );
+}
+
+// --- the stated confidence is measurable, not ornamental -------------------------
+{
+  const cal = store.reportedConfidenceCalibration(db);
+  check(
+    "stated confidence is recorded against what happened to the claim",
+    cal.commits >= 2 && typeof cal.mean_reported === "number" && cal.later_refuted >= 0,
+    JSON.stringify(cal),
+  );
+  check("a small sample says so instead of implying a trend", cal.note.includes("too few"));
+}
 
 // --- persistence round-trip -----------------------------------------------------
 saveState(db, state);

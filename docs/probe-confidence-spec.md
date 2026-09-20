@@ -4,6 +4,17 @@
 **Target:** local models feeding efh-core; conscience-servitor integration
 **Basis:** Sarfati et al., "What LLM Forecasters Know but Don't Say" (Goodfire/Eternis, arXiv:2607.08046, 2026); FSM spec (probe-anchored substrate monitoring)
 
+> **Status note.** The gate no longer consumes `confidence_score`. A number the
+> author supplies about its own output cannot verify that output, so counting it
+> as a gate leg overstated the gate's independence; it is now recorded as
+> `reported_confidence` and reported back as calibration by `session_status`.
+> That does not settle this spec — it sharpens the question it should answer.
+> A probe-derived confidence is a better estimator than a verbalized one, but it
+> is still the same system reporting on itself, so the open decision is whether
+> it earns a gate leg or belongs where the verbalized number now sits: measured
+> against outcomes rather than trusted at commit time. The calibration readout
+> is the place to settle that empirically.
+
 ## Problem
 
 The efh-core commit gate consumes `confidence_score` — currently the agent's
@@ -95,3 +106,62 @@ RTX 3060 12GB: 8B-class model in 4-bit + fp16 hook capture is comfortable for
 activation extraction; probe training is trivial (linear head). Qwen3-0.6B
 (already resident for LLM2Vec-Gen) is the fast-iteration target; Qwen3-8B the
 production target.
+
+## Transfer evaluation protocol (before trusting the probe at the gate)
+
+The closed Z3-labeling loop introduces a specific danger: the probe may learn
+surface features of the SMT-decidable regime (quantifiers, integers, logical
+form) rather than the model's epistemic state, so in-distribution calibration
+looks great and collapses out-of-domain. The eval is built to catch exactly that.
+
+### Reframe: discrimination transfers hard, calibration is cheaply recoverable
+
+ECE and AUROC fail-transfer differently and must be measured separately.
+- If the probe still DISCRIMINATES out-of-domain (AUROC > 0.5) but is
+  miscalibrated, that is fixable with one scalar: a per-domain temperature fit on
+  a small labeled slice.
+- If the probe stops discriminating (AUROC -> 0.5), no recalibration saves it.
+
+So the primary transfer metric is **AUROC degradation** (the hard-to-fix part);
+ECE is treated as recoverable via per-domain temperature. "Measure ECE
+degradation" alone is the wrong target.
+
+### The ladder (each rung has its own ground truth)
+
+- **L0 in-distribution** - same generator/domain (integer arithmetic + logic),
+  Z3-labeled, clean split. Ceiling AUROC/ECE + shuffle-control floor.
+- **L1 content transfer, same regime** - different SMT-decidable theories never
+  trained on (reals, bit-vectors, arrays, propositional). Z3-labeled -> gold on
+  both sides, free. Catches "learned SMT-surface features of integers."
+- **L2 regime transfer, oracle-verifiable** - decidable by a DIFFERENT oracle
+  than Z3: answer-checkable word problems, KB-verifiable facts (Wikidata),
+  closed-form physics. Ground truth from that oracle. Catches "learned
+  formal-regime features" - the sharpest test, since all training labels are
+  formal.
+- **L3 open-domain** - genuinely non-formal reasoning claims; ground truth from a
+  small human/strong-oracle-labeled gold set (~hundreds; enough for AUROC + one
+  temperature). The real commit-gate target regime; pay for the gold set here.
+
+### Metrics at every rung
+
+AUROC (primary), ECE with **adaptive/equal-mass binning** (equal-width manufactures
+artifacts on skewed confidence), Brier, reliability diagram. Compare against three
+baselines at each rung: verbalized confidence, mean token logprob, self-consistency
+spread. The probe must beat these to justify itself.
+
+### Pre-registered accept/reject rule
+
+1. Shuffle-label control falls to chance at EVERY rung, else pipeline leak -> void.
+2. AUROC meaningfully > 0.5 at L2 AND L3 (discrimination reaches the target regime).
+3. After a per-domain temperature fit on a small L2/L3 slice, ECE beats verbalized
+   confidence in that regime.
+4. If AUROC survives but ECE does not recover: usable only with per-domain
+   recalibration -> the gate must be domain-aware.
+
+### Deployment consequence - domain-aware gating
+
+The probe augments the commit gate ONLY in domains the ladder validated, with a
+fitted per-domain temperature. Outside validated domains the gate falls back to
+the symbolic verifier and its "unknown = not a pass" rule. The probe never
+replaces the verifier; it adds a calibrated confidence channel where it has been
+shown to transfer, and stays silent where it has not.
