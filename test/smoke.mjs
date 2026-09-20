@@ -308,6 +308,52 @@ check(
   check("disagreement between the two questions is reported", judgment.split === true);
   check("agreement between the two questions is not flagged", (await equivalent.equivalence("a", "b")).split === false);
 
+  // Near the decision boundary a single draw is not enough: measured on a real
+  // gloss pair, the same comparison scored 0.61 / 0.69 / 0.65 against a 0.6 floor.
+  const sequence = (values, relation = "equivalent") => {
+    let i = 0;
+    return async () => {
+      const noul = values[Math.min(i++, values.length - 1)];
+      return new Response(
+        JSON.stringify({
+          model: "jev-1.13.0",
+          answers: {
+            relation: { type: "choice", choice: relation, confidence: 0.9 },
+            same_truth_conditions: { type: "noul", noul },
+          },
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    };
+  };
+
+  const decisive = new Judge(sequence([0.97]));
+  const clear = await decisive.equivalence("decisive a", "decisive b");
+  check("a decisive score is not re-sampled", clear.samples === 1 && clear.unsettled === false);
+
+  const noisy = new Judge(sequence([0.65, 0.61, 0.69, 0.66, 0.64]));
+  const settled = await noisy.equivalence("noisy a", "noisy b");
+  check(
+    "a near-boundary score is re-sampled and the median decides",
+    settled.samples === 5 && settled.same_truth_conditions === 0.65 && settled.unsettled === false,
+    JSON.stringify(settled),
+  );
+  check("the spread is reported, so a tight result reads differently from a lucky one",
+    settled.spread[0] === 0.61 && settled.spread[1] === 0.69);
+
+  const straddling = new Judge(sequence([0.62, 0.58, 0.64, 0.55, 0.61]));
+  const undecided = await straddling.equivalence("straddle a", "straddle b");
+  check(
+    "samples on both sides of the floor are unsettled, and the lowest is used",
+    undecided.unsettled === true && undecided.same_truth_conditions === 0.55,
+    JSON.stringify(undecided),
+  );
+  check(
+    "an unsettled pair therefore fails the floor rather than passing on a median",
+    undecided.same_truth_conditions < 0.6,
+  );
+
   // Fail-loud, and never echo the key back.
   const denied = new Judge(async () => new Response("bad key test-secret", { status: 401 }));
   let threw = null;

@@ -157,6 +157,8 @@ yellow, and the gate refuses with the reason spelled out.
 | `EFH_JUDGE_MONITOR`           | `on` / `off` — also route the monitor's text channel through the judge | `off` |
 | `EFH_JUDGE_PROVIDER`          | `typesafe` / `openrouter`                  | `typesafe`                       |
 | `EFH_JUDGE_MODEL`             | judgment model                             | provider's latest alias          |
+| `EFH_JUDGE_BAND`              | re-sample when a judgment lands this close to the fidelity floor | `0.15`     |
+| `EFH_JUDGE_SAMPLES`           | samples drawn inside that band; the median decides | `5`                      |
 | `EFH_EPSILON_PRIMAL`          | monitor escalation threshold               | `0.15`                           |
 | `EFH_DUAL_WARNING`            | monitor pressure threshold                 | `5.0`                            |
 | `EFH_Z3_TIMEOUT_MS`           | prover timeout per check                   | `15000`                          |

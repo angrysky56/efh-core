@@ -60,7 +60,10 @@ for (const [label, gloss] of glosses) {
   if (commit.committed !== expected) failures += 1;
   console.log(
     `${commit.committed === expected ? "PASS" : "FAIL"} ${label}: proof=${v.result} ` +
-      `fidelity=${v.fidelity} (${v.fidelity_method}, ${v.fidelity_relation ?? "n/a"}) committed=${commit.committed}`,
+      `fidelity=${v.fidelity} (${v.fidelity_method}, ${v.fidelity_relation ?? "n/a"}, ` +
+      `${v.fidelity_samples ?? 1} sample${v.fidelity_samples > 1 ? "s" : ""}` +
+      `${v.fidelity_spread ? ` spread ${v.fidelity_spread[0]}–${v.fidelity_spread[1]}` : ""}` +
+      `${v.fidelity_unsettled ? ", UNSETTLED" : ""}) committed=${commit.committed}`,
   );
   if (!commit.committed) console.log(`     ${commit.reason}`);
 }

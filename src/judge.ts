@@ -28,6 +28,12 @@ const DEFAULT_MODELS = {
 export type JudgeProvider = keyof typeof ENDPOINTS;
 
 export interface EquivalenceJudgment {
+  /** How many samples were drawn; more than one means the score landed near the decision boundary. */
+  samples: number;
+  /** Lowest and highest sample, so a tight result is distinguishable from a lucky one. */
+  spread: [number, number];
+  /** True when samples fell on both sides of the boundary: the pair is not settled. */
+  unsettled: boolean;
   /** Probability that the two statements hold in exactly the same situations. */
   same_truth_conditions: number;
   /** How the second statement relates to the first. */
@@ -50,6 +56,27 @@ export class JudgeUnavailableError extends Error {
     );
     this.name = "JudgeUnavailableError";
   }
+}
+
+/**
+ * Decision boundary and re-sampling policy.
+ *
+ * Measured on a real gloss pair, one judgment varied 0.61 / 0.69 / 0.65 across
+ * runs while its floor sat at 0.6 — about 0.05 of margin against 0.04 of spread,
+ * so a single draw could refuse a correct formalization. Scores far from the
+ * boundary were stable (an unfaithful pair scored 0.15 / 0.13 / 0.13), so only
+ * the near-boundary band is re-sampled; everywhere else one call still decides.
+ * Calls are cheap, correctness at the threshold is not.
+ */
+export function judgeBoundary(): number {
+  return Number(process.env.EFH_FIDELITY_MIN ?? 0.6);
+}
+export function judgeBand(): number {
+  return Number(process.env.EFH_JUDGE_BAND ?? 0.15);
+}
+export function judgeSamples(): number {
+  const n = Number(process.env.EFH_JUDGE_SAMPLES ?? 5);
+  return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 15) : 5;
 }
 
 export function judgeEnabled(): boolean {
@@ -120,12 +147,8 @@ export class Judge {
     }
   }
 
-  /** Judge how statement b relates to statement a. Throws when the channel cannot run. */
-  async equivalence(a: string, b: string): Promise<EquivalenceJudgment> {
-    const key = `${a}\u0000${b}`;
-    const hit = this.mem.get(key);
-    if (hit) return hit;
-
+  /** One provider call. The caller decides how many of these a decision is worth. */
+  private async sample(a: string, b: string): Promise<{ noul: number; relation: string; confidence: number; model: string }> {
     const provider = judgeProvider();
     const secret = apiKey(provider);
     if (!secret) throw new JudgeUnavailableError(`no key for provider '${provider}'`);
@@ -161,15 +184,59 @@ export class Judge {
     if (typeof noul !== "number" || noul < 0 || noul > 1 || typeof relation !== "string") {
       throw new JudgeUnavailableError("provider returned a malformed judgment");
     }
+    return { noul, relation, confidence: typeof confidence === "number" ? confidence : 0, model: data.model ?? model };
+  }
+
+  /**
+   * Judge how statement b relates to statement a. Throws when the channel cannot run.
+   *
+   * One sample decides unless the score lands within `EFH_JUDGE_BAND` of the
+   * decision boundary; then `EFH_JUDGE_SAMPLES` are drawn and the median is used.
+   * If those samples fall on both sides of the boundary the pair is unsettled, and
+   * the lowest sample is returned rather than the median — an undecided comparison
+   * must not read as a passed one.
+   */
+  async equivalence(a: string, b: string): Promise<EquivalenceJudgment> {
+    const key = `${a}\u0000${b}`;
+    const hit = this.mem.get(key);
+    if (hit) return hit;
+
+    const boundary = judgeBoundary();
+    const band = judgeBand();
+    const draws = [await this.sample(a, b)];
+    if (Math.abs(draws[0].noul - boundary) <= band) {
+      for (let i = 1; i < judgeSamples(); i++) draws.push(await this.sample(a, b));
+    }
+
+    const values = draws.map((d) => d.noul).sort((x, y) => x - y);
+    const low = values[0];
+    const high = values[values.length - 1];
+    const median =
+      values.length % 2 === 1
+        ? values[(values.length - 1) / 2]
+        : (values[values.length / 2 - 1] + values[values.length / 2]) / 2;
+    const unsettled = low < boundary && high >= boundary;
+    const value = unsettled ? low : median;
+
+    // Modal relation across the draws; ties keep the first seen.
+    const tally = new Map<string, number>();
+    for (const d of draws) tally.set(d.relation, (tally.get(d.relation) ?? 0) + 1);
+    const relation = [...tally.entries()].reduce((best, entry) => (entry[1] > best[1] ? entry : best))[0];
+    const relationConfidence =
+      draws.filter((d) => d.relation === relation).reduce((sum, d) => sum + d.confidence, 0) /
+      draws.filter((d) => d.relation === relation).length;
 
     const judgment: EquivalenceJudgment = {
-      same_truth_conditions: Math.round(noul * 10000) / 10000,
+      same_truth_conditions: Math.round(value * 10000) / 10000,
       relation,
-      relation_confidence: typeof confidence === "number" ? confidence : 0,
-      model: data.model ?? model,
+      relation_confidence: Math.round(relationConfidence * 10000) / 10000,
+      model: draws[0].model,
+      samples: draws.length,
+      spread: [Math.round(low * 10000) / 10000, Math.round(high * 10000) / 10000],
+      unsettled,
       // The two questions are independent views of one pair. On the probe set the
       // only pair they split on (an inverse-fallacy gloss) was the hardest case.
-      split: (relation === "equivalent") !== noul >= 0.6,
+      split: (relation === "equivalent") !== value >= boundary,
     };
     this.mem.set(key, judgment);
     return judgment;

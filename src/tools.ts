@@ -135,6 +135,17 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         const j = await judge.equivalence(claimText, gloss);
         return below(j.same_truth_conditions, "judgment", {
           fidelity_relation: j.relation,
+          fidelity_samples: j.samples,
+          ...(j.samples > 1 ? { fidelity_spread: j.spread } : {}),
+          ...(j.unsettled
+            ? {
+                fidelity_unsettled: true as const,
+                fidelity_note_unsettled:
+                  `repeated judgments fell on both sides of the floor (${j.spread[0]}–${j.spread[1]}); ` +
+                  "the lowest is used, because an undecided comparison must not read as a passed one — " +
+                  "reformalize or write a gloss that states the direction of the implication explicitly",
+              }
+            : {}),
           // Two independent views of one pair; a split is a hard case, not a verdict.
           ...(j.split
             ? {
