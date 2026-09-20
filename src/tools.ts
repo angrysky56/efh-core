@@ -12,7 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { Embedder } from "./embeddings.js";
-import { Judge, judgeEnabled } from "./judge.js";
+import { Judge, judgeBand, judgeBoundary, judgeEnabled, judgeSamples } from "./judge.js";
 import { runFullCycle } from "./enforcer/admm.js";
 import {
   saveState,
@@ -112,6 +112,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
     fidelity: number | null;
     fidelity_method?: "judgment" | "embedding";
     fidelity_relation?: string;
+    fidelity_samples?: number;
+    fidelity_spread?: [number, number];
+    fidelity_unsettled?: true;
     fidelity_split?: true;
     fidelity_warning?: true;
     fidelity_note?: string;
@@ -308,6 +311,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           proof_confidence: pc,
           fidelity: fid.fidelity,
           fidelity_method: fid.fidelity_method ?? null,
+          fidelity_samples: fid.fidelity_samples ?? null,
+          fidelity_spread: fid.fidelity_spread ?? null,
+          fidelity_unsettled: fid.fidelity_method === "judgment" ? (fid.fidelity_unsettled ?? false) : null,
           gloss: gloss ?? null,
           strengthenings: strengthenings ?? null,
         });
@@ -388,6 +394,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           proof_confidence: pc,
           fidelity: fid.fidelity,
           fidelity_method: fid.fidelity_method ?? null,
+          fidelity_samples: fid.fidelity_samples ?? null,
+          fidelity_spread: fid.fidelity_spread ?? null,
+          fidelity_unsettled: fid.fidelity_method === "judgment" ? (fid.fidelity_unsettled ?? false) : null,
           gloss: gloss ?? null,
           strengthenings: strengthenings ?? null,
         });
@@ -712,7 +721,14 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
               : monitorJudge()
                 ? "typed judgment — compares truth conditions, not just claim identity"
                 : "embedding — claim identity only; truth disagreement rides on the scalar channels",
-          judge: judge.probe(),
+          judge: {
+            ...judge.probe(),
+            // Both affect whether a commit passes, so they belong in the health report.
+            resample_band: judgeBand(),
+            resample_samples: judgeSamples(),
+            boundary: judgeBoundary(),
+            monitor_channel: monitorJudge(),
+          },
         },
         commit_min_confidence: Number(process.env.EFH_COMMIT_MIN_CONFIDENCE ?? 0.7),
         fidelity_min: FIDELITY_MIN,

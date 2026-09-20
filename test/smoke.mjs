@@ -156,6 +156,26 @@ check(
   `n=${forms.length}`,
 );
 
+// How a fidelity number was arrived at is stored with it, or the floor can
+// never be calibrated against glosses from real sessions.
+store.saveFormalization(db, {
+  claim_id: claim.id, axioms: ["(declare-const r Bool)", "(assert r)"], conjecture: "r",
+  backend: "z3", result: "proved", proof_confidence: 1, fidelity: 0.65,
+  fidelity_method: "judgment", fidelity_samples: 5, fidelity_spread: [0.61, 0.69],
+  fidelity_unsettled: false, gloss: "r holds given that r is asserted", strengthenings: null,
+});
+{
+  const [latest] = store.getFormalizations(db, claim.id);
+  check(
+    "how a fidelity number was reached is stored, not just the number",
+    latest.fidelity === 0.65 && latest.fidelity_samples === 5 &&
+      latest.fidelity_spread_low === 0.61 && latest.fidelity_spread_high === 0.69 &&
+      latest.fidelity_unsettled === 0,
+    JSON.stringify(latest),
+  );
+}
+
+
 // --- strengthening soundness cap -------------------------------------------------
 check(
   "strengthened proof capped at 0.6",

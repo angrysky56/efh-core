@@ -67,6 +67,14 @@ onto the same edge-space key names (`edge_claim`, `edge_confidence`,
 | `set_restriction_map` | Wire a directed edge's projection (compare: hash \| semantic) |
 | `reset_session` | Clean enforcer slate; claims and audit persist |
 | `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ fidelity ≥ floor ∧ KERNEL1 (`reported_confidence` is recorded for calibration, not a leg) |
+
+Each row in `formalizations` records how its fidelity number was reached:
+`fidelity_method` (`judgment` | `embedding`), `fidelity_samples`,
+`fidelity_spread_low` / `fidelity_spread_high`, and `fidelity_unsettled`
+(1 when repeated judgments straddled the floor, 0 when they settled, NULL when
+no judgment ran). A stored 0.65 from one draw and a 0.65 median of five are not
+the same evidence, and the floor cannot be calibrated without telling them
+apart.
 | `session_status` | Health: claim counts, enforcer summary, backend availability |
 
 ## Enforcer mathematics

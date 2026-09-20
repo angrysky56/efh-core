@@ -137,6 +137,9 @@ export interface CommitOutcome {
     min_confidence: number;
     fidelity: number | null;
     fidelity_method: string | null;
+    fidelity_samples?: number | null;
+    fidelity_spread?: [number, number] | null;
+    fidelity_unsettled?: boolean | null;
     fidelity_min: number;
     /** "off" means the fidelity leg was disabled for this commit, and says so. */
     fidelity_gate: "on" | "off";
@@ -253,12 +256,15 @@ export function saveFormalization(
     proof_confidence: number | null;
     fidelity: number | null;
     fidelity_method: string | null;
+    fidelity_samples?: number | null;
+    fidelity_spread?: [number, number] | null;
+    fidelity_unsettled?: boolean | null;
     gloss: string | null;
     strengthenings: string[] | null;
   },
 ): void {
   db.prepare(
-    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, fidelity_samples, fidelity_spread_low, fidelity_spread_high, fidelity_unsettled, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     f.claim_id,
     JSON.stringify(f.axioms),
@@ -268,6 +274,10 @@ export function saveFormalization(
     f.proof_confidence,
     f.fidelity,
     f.fidelity_method,
+    f.fidelity_samples ?? null,
+    f.fidelity_spread?.[0] ?? null,
+    f.fidelity_spread?.[1] ?? null,
+    f.fidelity_unsettled === undefined || f.fidelity_unsettled === null ? null : f.fidelity_unsettled ? 1 : 0,
     f.gloss,
     f.strengthenings ? JSON.stringify(f.strengthenings) : null,
   );

@@ -104,6 +104,11 @@ export interface Formalization {
   /** 1 − embedding distance between claim text and the independent gloss; null if unmeasured. */
   fidelity: number | null;
   fidelity_method: string | null;
+  fidelity_samples: number | null;
+  fidelity_spread_low: number | null;
+  fidelity_spread_high: number | null;
+  /** SQLite has no boolean: 1 when repeated judgments straddled the floor. */
+  fidelity_unsettled: number | null;
   gloss: string | null;
   /** JSON array of declared strengthenings (UF interpretations, bounds); null if faithful. */
   strengthenings: string | null;

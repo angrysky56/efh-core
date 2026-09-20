@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS formalizations (
   proof_confidence REAL,
   fidelity REAL,
   fidelity_method TEXT,
+  fidelity_samples INTEGER,
+  fidelity_spread_low REAL,
+  fidelity_spread_high REAL,
+  fidelity_unsettled INTEGER,
   gloss TEXT,
   strengthenings TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -96,6 +100,18 @@ function migrate(db: Database.Database): void {
   // "embedding" means topical overlap only.
   if (!cols.some((c) => c.name === "fidelity_method")) {
     db.exec("ALTER TABLE formalizations ADD COLUMN fidelity_method TEXT");
+  }
+  // How the fidelity number was arrived at: one draw or several, how far apart
+  // they fell, and whether they disagreed about which side of the floor it sits
+  // on. Without these a stored 0.65 cannot be told from a lucky 0.65, and the
+  // floor can never be calibrated against real glosses.
+  for (const [name, type] of [
+    ["fidelity_samples", "INTEGER"],
+    ["fidelity_spread_low", "REAL"],
+    ["fidelity_spread_high", "REAL"],
+    ["fidelity_unsettled", "INTEGER"],
+  ] as const) {
+    if (!cols.some((c) => c.name === name)) db.exec(`ALTER TABLE formalizations ADD COLUMN ${name} ${type}`);
   }
 }
 
