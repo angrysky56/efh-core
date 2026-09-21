@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { VerifyResult } from "./types.js";
 import { config } from "./config.js";
+import { parseProblem, renderProblem, type SymbolGlossary } from "./translation.js";
 
 const execFileP = promisify(execFile);
 
@@ -169,32 +170,50 @@ async function z3Check(statements: string[]): Promise<VerifyResult> {
   }
 }
 
+/** Parse once; render and solve the same AST objects, with no caller gloss. */
+async function z3ImplicationProblem(
+  axioms: string[], conjecture: string, glossary: SymbolGlossary = {},
+): Promise<VerifyResult> {
+  const t0 = Date.now();
+  try {
+    const ctx = await getZ3();
+    const parsed = parseProblem(ctx, axioms, conjecture);
+    const translation = renderProblem(ctx, parsed.axioms, parsed.conjecture, axioms, conjecture, glossary);
+    const solver = new ctx.Solver();
+    solver.set("timeout", Z3_TIMEOUT_MS);
+    const names = new Map<string, string>();
+    for (const axiom of parsed.axioms) {
+      // Fresh tracking symbols cannot collide with any caller-defined symbol.
+      const tracker = ctx.Bool.fresh();
+      names.set(String(tracker), `(assert ${axiom.sexpr()})`);
+      solver.addAndTrack(axiom, tracker);
+    }
+    // Contradictory premises prove everything. Keep the proof result, but make
+    // the failed premise check explicit and ineligible for commitment.
+    translation.premise_consistency = await solver.check();
+    solver.add(ctx.Not(parsed.conjecture));
+    const result: "sat" | "unsat" | "unknown" = await solver.check();
+    return {
+      backend: "z3", result, translation,
+      detail: result === "unsat" ? "Conjecture follows from the supplied axioms"
+        : result === "sat" ? "Counterexample found — conjecture does NOT follow from axioms"
+        : "Z3 returned unknown; this is NOT a pass",
+      ...(result === "sat" ? {model: modelToString(solver.model())} : {}),
+      ...(result === "unsat" ? {unsat_core: extractCore(solver, names)} : {}),
+      elapsed_ms: Date.now() - t0,
+    };
+  } catch (error) {
+    return {backend: "z3", result: "error", detail: `Z3 input error: ${error instanceof Error ? error.message : String(error)}`,
+      elapsed_ms: Date.now() - t0};
+  }
+}
+
 /** axioms ∪ {¬conjecture}: unsat ⇒ proved, sat ⇒ refuted (model = counterexample). */
 export async function z3VerifyImplication(
-  axioms: string[],
-  conjecture: string,
+  axioms: string[], conjecture: string, glossary?: SymbolGlossary,
 ): Promise<VerifyResult> {
-  const r = await z3Check([
-    ...axioms,
-    `(assert (! (not ${conjecture}) :named negated_conjecture))`,
-  ]);
-  if (r.result === "unsat") {
-    return {
-      ...r,
-      result: "proved",
-      detail:
-        "Conjecture follows from axioms (¬conjecture unsat)" +
-        (r.unsat_core ? " — unsat_core lists the axioms that carried the proof" : ""),
-    };
-  }
-  if (r.result === "sat") {
-    return {
-      ...r,
-      result: "refuted",
-      detail: "Counterexample found — conjecture does NOT follow from axioms",
-    };
-  }
-  return r;
+  const r = await z3ImplicationProblem(axioms, conjecture, glossary);
+  return {...r, result: r.result === "unsat" ? "proved" : r.result === "sat" ? "refuted" : r.result};
 }
 
 /** Satisfiability of the axiom set itself. sat ⇒ consistent (model as witness). */
@@ -205,20 +224,11 @@ export async function z3CheckConsistency(statements: string[]): Promise<VerifyRe
   return r;
 }
 
-/** Mace4 role: explicit counterexample search for axioms ∪ {¬conjecture}. */
+/** The same parsed problem and rendering are used for counterexample searches. */
 export async function z3FindCounterexample(
-  axioms: string[],
-  conjecture: string,
+  axioms: string[], conjecture: string, glossary?: SymbolGlossary,
 ): Promise<VerifyResult> {
-  const r = await z3Check([
-    ...axioms,
-    `(assert (! (not ${conjecture}) :named negated_conjecture))`,
-  ]);
-  if (r.result === "sat") return { ...r, detail: "Counterexample model found" };
-  if (r.result === "unsat") {
-    return { ...r, detail: "No counterexample exists — conjecture is entailed" };
-  }
-  return r;
+  return z3ImplicationProblem(axioms, conjecture, glossary);
 }
 
 /**

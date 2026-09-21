@@ -6,11 +6,12 @@
  * Run: npm run build && npm run smoke
  */
 
-import { rmSync } from "node:fs";
+import { rmSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const DB = join(tmpdir(), "efh-smoke.db");
+const scratch = mkdtempSync(join(tmpdir(), "efh-smoke-"));
+const DB = join(scratch, "ledger.sqlite");
 for (const suffix of ["", "-wal", "-shm"]) {
   try {
     rmSync(DB + suffix);
@@ -24,6 +25,7 @@ const { loadState, saveState } = await import("../dist/enforcer/state.js");
 const { runFullCycle, stringToFloat } = await import("../dist/enforcer/admm.js");
 const { Embedder } = await import("../dist/embeddings.js");
 const store = await import("../dist/store.js");
+const { approveFixture } = await import("./fixtures/review.mjs");
 const { FIDELITY_POLICY_REVISION } = await import("../dist/fidelity.js");
 // Synthetic measurements used only for direct store/gate fixtures.
 const fixtureProvenance = {
@@ -174,6 +176,7 @@ store.saveFormalization(db, {
   fidelity_decision: "passed",
   fidelity_provenance: fixtureProvenance,
   fidelity_unsettled: false, gloss: "r holds given that r is asserted", strengthenings: null,
+  translation: (await z3VerifyImplication(["(declare-const r Bool)", "(assert r)"], "r", {r:"R"})).translation,
 });
 {
   const [latest] = store.getFormalizations(db, claim.id);
@@ -203,6 +206,7 @@ check("faithful proof uncapped", capStrengthened(1.0, undefined).pc === 1.0);
 // --- gate ---------------------------------------------------------------------
 store.recordVerification(db, claim.id, 1.0, false, "smoke: proved");
 state.resetAdmm(); // sanctioned de-escalation -> KERNEL1
+await approveFixture(DB, store.getFormalizations(db, claim.id)[0].id);
 let outcome = store.commitClaim(db, claim.id, 0.9, state.closure_status);
 check("gate commits under KERNEL1 + proof + fidelity", outcome.committed === true, outcome.reason);
 // The stated confidence is recorded, not counted: a commit that would pass the
@@ -216,7 +220,9 @@ check("gate commits under KERNEL1 + proof + fidelity", outcome.committed === tru
     fidelity_decision: "passed",
     fidelity_provenance: fixtureProvenance,
     fidelity_method: "judgment", gloss: "p holds given that p is asserted", strengthenings: null,
+    translation: (await z3VerifyImplication(["(declare-const p Bool)", "(assert p)"], "p", {p:"P"})).translation,
   });
+  await approveFixture(DB, store.getFormalizations(db, twin.id)[0].id);
   const zero = store.commitClaim(db, twin.id, 0.0, state.closure_status);
   check("a self-reported confidence of zero does not block a verified commit", zero.committed === true, zero.reason);
   check("the gate no longer has a self-report leg", !("confidence_score_ok" in zero.gate));
@@ -296,8 +302,8 @@ check(
   });
   const off = JSON.parse(raw.trim().split("\n").pop());
   check(
-    "EFH_GATE_FIDELITY=off commits, and the outcome says the leg was off",
-    off.committed === true && off.gate === "off",
+    "EFH_GATE_FIDELITY=off cannot bypass the translation gate",
+    off.committed === false && off.gate === "off",
     raw,
   );
 }
@@ -444,10 +450,12 @@ check(
     fidelity_decision: "passed",
     fidelity_provenance: fixtureProvenance,
     fidelity_method: "judgment", gloss: "p holds given that p is asserted", strengthenings: null,
+    translation: (await z3VerifyImplication(["(declare-const p Bool)", "(assert p)"], "p", {p:"P"})).translation,
   });
   state.resetAdmm(); // sanctioned de-escalation -> KERNEL1
+  await approveFixture(DB, store.getFormalizations(db, probed.id)[0].id);
   const probeCommit = store.commitClaim(db, probed.id, 0.62, state.closure_status, undefined, "probe");
-  check("a probe-sourced commit passes the same three legs", probeCommit.committed === true, probeCommit.reason);
+  check("a probe-sourced commit passes the same reviewed gate", probeCommit.committed === true, probeCommit.reason);
 
   const cal = store.reportedConfidenceCalibration(db);
   check(
@@ -474,4 +482,5 @@ check(
 
 db.close();
 console.log(failures === 0 ? "\nALL SMOKE TESTS PASSED" : `\n${failures} FAILURE(S)`);
+rmSync(scratch, {recursive:true, force:true});
 process.exit(failures === 0 ? 0 : 1); // z3 worker threads would otherwise hold the loop open

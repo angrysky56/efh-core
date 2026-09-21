@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { Embedder } from "./embeddings.js";
 import { Judge, judgeBand, judgeBoundary, judgeEnabled, judgeSamples } from "./judge.js";
 import { config } from "./config.js";
+import { RENDERER_REVISION } from "./translation.js";
 import { fidelityDecision, FIDELITY_POLICY_REVISION, GLOSS_TRUST_NOTE } from "./fidelity.js";
 import { runFullCycle } from "./enforcer/admm.js";
 import {
@@ -47,12 +48,11 @@ const text = (obj: unknown) => ({
 /** Below this, the gloss (what the formalization says) diverges from the claim (what was meant). */
 const FIDELITY_MIN = config.fidelityMin;
 
-const GLOSS_DESC =
-  "English rendering of what the axioms + conjecture LITERALLY say, written " +
-  "from the formalization alone (do not copy the claim text). Used to measure formalization " +
-  "fidelity: claim/gloss agreement by the configured comparator. The server does not " +
-  "verify the formula-to-gloss translation; that remains a trust assumption. " +
-  "Low fidelity means the encoding may not say what the claim says — reformalize.";
+const GLOSS_DESC = "Optional caller explanation, stored for audit only. Fidelity uses the server-generated rendering of the actual parsed formulas.";
+const SYMBOL_GLOSSARY_DESC =
+  "Proposed meanings for every used symbol and uninterpreted sort (sort keys use 'sort:Name'). " +
+  "Function/predicate meanings must include every argument as {0}, {1}, etc. " +
+  "These meanings require separate local operator review before commitment; they are not self-certifying.";
 
 const STRENGTHENINGS_DESC =
   "Declare anything that STRENGTHENS the encoding beyond the claim: concrete define-fun " +
@@ -95,7 +95,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
   };
 
   /**
-   * Formalization fidelity: does the gloss say what the claim says?
+   * Formalization fidelity: does the parsed, server-rendered statement say what the claim says?
    *
    * With EFH_JUDGE=jev this is a typed judgment (the probability that the two
    * hold in exactly the same situations). Otherwise it is 1 − embedding
@@ -127,7 +127,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
   }> => {
     if (!claimText) return { fidelity: null, fidelity_decision: "unmeasured" };
     if (!gloss) {
-      return { fidelity: null, fidelity_decision: "unmeasured", fidelity_note: "no gloss supplied — formalization fidelity unmeasured" };
+      return { fidelity: null, fidelity_decision: "unmeasured", fidelity_note: "supported formula rendering with complete symbol meanings unavailable — fidelity unmeasured" };
     }
     const below = (fidelity: number, method: "judgment" | "embedding", extra: Record<string, unknown>) =>
       fidelity < FIDELITY_MIN
@@ -157,7 +157,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
                 fidelity_warning: true as const,
                 fidelity_note:
                   "Unsettled judgment: samples cross the floor, question answers conflict, or model builds differ. " +
-                  "The fidelity gate refuses this result; reformalize or review the gloss before retrying.",
+                  "The fidelity gate refuses this result; reformalize or review the generated rendering before retrying.",
               }
             : {}),
         };
@@ -288,6 +288,8 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         "one SMT-LIB boolean expression, e.g. axioms: ['(declare-const p Bool)', '(assert p)'], " +
         "conjecture: 'p'. backend 'prover9' (requires LADR installed): Prover9 syntax, axioms " +
         "are assumptions, conjecture is the goal. Result 'unknown' is NOT a pass. " +
+        "Declarations must precede assertions; solver-control commands are refused. " +
+        "Fidelity uses a parser-backed rendering. Symbol meanings and premises need local review before commitment. " +
         "Auto-registers the verifier facet; pass claim_id to bind the result to a stored claim.",
       inputSchema: {
         axioms: z.array(z.string()),
@@ -295,14 +297,15 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         backend: z.enum(["z3", "prover9"]).optional(),
         claim_id: z.number().int().optional(),
         gloss: z.string().optional().describe(GLOSS_DESC),
+        symbol_glossary: z.record(z.string().min(1).max(500)).optional().describe(SYMBOL_GLOSSARY_DESC),
         strengthenings: z.array(z.string()).optional().describe(STRENGTHENINGS_DESC),
       },
     },
-    async ({ axioms, conjecture, backend, claim_id, gloss, strengthenings }) => {
+    async ({ axioms, conjecture, backend, claim_id, gloss, symbol_glossary, strengthenings }) => {
       const result =
         backend === "prover9"
           ? await prover9Prove(axioms, [conjecture])
-          : await z3VerifyImplication(axioms, conjecture);
+          : await z3VerifyImplication(axioms, conjecture, symbol_glossary);
       const { pc, ...capFlags } = capStrengthened(proofConfidence(result), strengthenings);
       const contradiction = result.result === "refuted";
       // Semantic channel: when bound to a claim, the proof result IS that claim.
@@ -314,7 +317,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         proof_confidence: pc,
         contradictions_found: contradiction,
       });
-      const fid = await measureFidelity(bound?.text, gloss);
+      const fid = await measureFidelity(bound?.text,
+        result.translation?.status === "supported" && result.translation.missing_meanings.length === 0
+          ? result.translation.generated_gloss ?? undefined : undefined);
       if (bound && claim_id !== undefined) {
         store.saveFormalization(db, {
           claim_id,
@@ -332,6 +337,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           fidelity_decision: fid.fidelity_decision,
           fidelity_provenance: fid.fidelity_provenance ?? null,
           gloss: gloss ?? null,
+          translation: result.translation ?? null,
           strengthenings: strengthenings ?? null,
         });
       }
@@ -382,14 +388,15 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         backend: z.enum(["z3", "mace4"]).optional(),
         claim_id: z.number().int().optional(),
         gloss: z.string().optional().describe(GLOSS_DESC),
+        symbol_glossary: z.record(z.string().min(1).max(500)).optional().describe(SYMBOL_GLOSSARY_DESC),
         strengthenings: z.array(z.string()).optional().describe(STRENGTHENINGS_DESC),
       },
     },
-    async ({ axioms, conjecture, backend, claim_id, gloss, strengthenings }) => {
+    async ({ axioms, conjecture, backend, claim_id, gloss, symbol_glossary, strengthenings }) => {
       const result =
         backend === "mace4"
           ? await mace4FindModel(axioms, [conjecture])
-          : await z3FindCounterexample(axioms, conjecture);
+          : await z3FindCounterexample(axioms, conjecture, symbol_glossary);
       const found = result.result === "sat" || result.result === "refuted";
       const entailed = result.result === "unsat" || result.result === "proved";
       const { pc, ...capFlags } = capStrengthened(found ? 0.0 : entailed ? 1.0 : 0.5, strengthenings);
@@ -400,7 +407,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         proof_confidence: pc,
         contradictions_found: found,
       });
-      const fid = await measureFidelity(bound?.text, gloss);
+      const fid = await measureFidelity(bound?.text,
+        result.translation?.status === "supported" && result.translation.missing_meanings.length === 0
+          ? result.translation.generated_gloss ?? undefined : undefined);
       if (bound && claim_id !== undefined) {
         store.saveFormalization(db, {
           claim_id,
@@ -418,6 +427,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           fidelity_decision: fid.fidelity_decision,
           fidelity_provenance: fid.fidelity_provenance ?? null,
           gloss: gloss ?? null,
+          translation: result.translation ?? null,
           strengthenings: strengthenings ?? null,
         });
       }
@@ -435,7 +445,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
       title: "Get formalizations",
       description:
         "Review the formal encodings behind a claim's verifications: axioms, conjecture, " +
-        "backend, result, gloss, and fidelity vs the claim text. The formalization step is " +
+        "backend, result, caller note, parser-backed rendering, review status, and fidelity vs the claim text. The formalization step is " +
         "the weakest link in the loop — audit it before trusting a proof.",
       inputSchema: {
         claim_id: z.number().int(),
@@ -659,11 +669,11 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
     {
       title: "Commit claim (gated)",
       description:
-        "Commit a claim to the world model. THE GATE — all three must hold: " +
+        "Commit a claim to the world model. THE GATE — all four must hold: " +
         "proof_confidence ≥ 0.7 (from a verify call bound to this claim), " +
-        "settled claim/gloss fidelity ≥ the floor (unmeasured or unsettled counts as failed), " +
-        "closure_status = KERNEL1. Supplied axioms and the formula-to-gloss translation " +
-        "remain trust assumptions. A refusal is a normal result with the " +
+        "settled claim/rendered-formula fidelity ≥ the floor (unmeasured or unsettled counts as failed), " +
+        "a current local review of the parsed translation, symbol meanings and premises; " +
+        "closure_status = KERNEL1. Proof remains conditional on the reviewed premises. A refusal is a normal result with the " +
         "reason and a recovery recommendation — it is the consistency check working.",
       inputSchema: {
         claim_id: z.number().int(),
@@ -755,7 +765,10 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
         fidelity_gate: config.fidelityGate ? "on" : "off",
         fidelity_policy: FIDELITY_POLICY_REVISION,
         trust_note: GLOSS_TRUST_NOTE,
-        gate_legs: ["proof_confidence", "fidelity", "closure_status"],
+        translation: {renderer: RENDERER_REVISION, gate: "always on", review: "local operator CLI; no MCP approval tool",
+          subset: "Boolean and equality first-order logic over Bool and uninterpreted sorts",
+          unsupported: "proof exploration allowed; commitment refused"},
+        gate_legs: ["proof_confidence", "fidelity", "translation_review", "closure_status"],
         reported_confidence: store.reportedConfidenceCalibration(db),
       });
     },

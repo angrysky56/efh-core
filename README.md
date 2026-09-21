@@ -27,22 +27,33 @@ control:
    currently arguing. When they drift apart, an alarm escalates through
    graded levels (think green → yellow → orange → red) before the
    inconsistency can contaminate anything.
-4. **A gate.** A claim is committed to the knowledge base only when three
-   conditions hold at once: the proof succeeded, the supplied English gloss has
-   a settled match with the claim, and the monitor shows green. A refusal is not an
-   error — it is the system working.
+4. **A gate.** A claim is committed only when the proof succeeded, the
+   server-rendered formulas have a settled match with the claim, their symbol
+   meanings and premise scope have a current operator review, and the monitor
+   shows green. A refusal is a normal result with a reason.
 
-The prover establishes that the conjecture follows from the supplied axioms.
-The fidelity channel compares the supplied gloss with the claim; **it does not
-verify that the gloss describes the formula**. Axioms and that translation remain
-trust assumptions. An unrelated proof paired with a misleading gloss can still
-pass, so review the encoding before treating a commit as established knowledge.
-Every commit outcome and verification result reports this limitation.
+The server parses the formulas with Z3 and uses those same syntax trees for
+proof and controlled-English rendering. Fidelity compares the claim against
+that rendering, including **all assumptions and the conclusion**. The caller's
+`gloss` is an audit note and cannot affect fidelity.
+
+The first supported rendering subset is Boolean and equality first-order logic
+with uninterpreted sorts, functions, and quantifiers. Arithmetic, arrays,
+bitvectors, datatypes and unsupported operators remain available for proof
+exploration but cannot commit. Missing symbol meanings, inconsistent premises,
+and unsupported renderings fail closed, even with `EFH_GATE_FIDELITY=off`.
+
+An independent operator reviews the exact artifact using the local
+[translation review workflow](docs/formula-translation.md). No MCP tool can
+approve its own translation. Any new verification or change to the evidence
+requires a new review. The review records grounding and justification; it does
+not mechanically establish that premises are true in the world, or authenticate
+reviewer independence against an actor with direct database access.
 
 Unmeasured or unsettled fidelity fails the gate. Samples crossing the floor,
 conflicting relation/score answers, or draws from different model builds are
 unsettled regardless of their median. Decisions use unrounded numbers. Historical
-rows without a recorded decision, or measurements made at a different floor,
+rows without the current parser-backed evidence and review, or measurements made at a different floor,
 need a new verification before another commit attempt; existing ledger records
 are preserved.
 
@@ -138,16 +149,15 @@ cp -r skills/* ~/.claude/skills/
 
 First session, in plain terms:
 
-```
-reset_session(confirm: true)                        # clean slate
-assert_claim("if a<b and b<c then a<c", 0.95)       # claim #1 enters the ledger
-verify_implication(axioms..., "(< a c)", claim_id:1,
-  gloss:"For numbers a, b, c: if a is below b and b below c, then a is below c.")
-register_agent_state("reasoner", {...})              # tell the monitor your view
-run_admm_cycle()                                     # monitor: green (KERNEL1)
-commit_claim(1, 0.95)                                # commits if fidelity is settled and passes
-get_audit_trail()                                    # the whole story, timestamped
-```
+1. Assert a claim whose stated scope includes its assumptions.
+2. Call `verify_implication` with SMT-LIB declarations followed by assertions,
+   a conjecture, `claim_id`, and `symbol_glossary` meanings.
+3. Inspect `get_formalizations`: the generated conditional statement, fidelity,
+   premise consistency, and review status are stored together.
+4. Have an independent operator complete the local review described in the
+   [worked example](docs/formula-translation.md).
+5. Register the reasoner state, run `run_admm_cycle`, then call `commit_claim`.
+   Proof, fidelity, current translation review, and KERNEL1 must all pass.
 
 Try to commit something the prover refuted, or commit while the monitor shows
 yellow, and the gate refuses with the reason spelled out.
@@ -162,7 +172,7 @@ yellow, and the gate refuses with the reason spelled out.
 | `EFH_EMBED_MODEL`             | embedding model                            | `nomic-embed-text`               |
 | `EFH_COMMIT_MIN_CONFIDENCE`   | gate threshold                             | `0.7`                            |
 | `EFH_FIDELITY_MIN`            | formalization-fidelity gate threshold      | `0.6`                            |
-| `EFH_GATE_FIDELITY`           | `on` / `off` — the fidelity leg of the gate (every outcome reports which) | `on` |
+| `EFH_GATE_FIDELITY`           | `on` / `off` — the fidelity score leg only; translation review remains mandatory | `on` |
 | `EFH_JUDGE`                   | `jev` / `off` — typed-judgment channel for formalization fidelity | `off` |
 | `EFH_JUDGE_MONITOR`           | `on` / `off` — also route the monitor's text channel through the judge | `off` |
 | `EFH_JUDGE_PROVIDER`          | `typesafe` / `openrouter`                  | `typesafe`                       |

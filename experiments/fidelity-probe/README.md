@@ -2,11 +2,11 @@
 
 ## Question
 
-`tools.ts` measures formalization fidelity as `1 − embedding cosine distance`
+The original probe measured formalization fidelity as `1 − embedding cosine distance`
 between a claim and the gloss of its formalization, and warns below
 `EFH_FIDELITY_MIN` (0.6). Embedding similarity measures topical overlap. The
 two ways a formalization actually goes wrong — negation and quantifier scope —
-barely move topical overlap. Does the production measure separate faithful
+barely move topical overlap. Did that measure separate faithful
 formalizations from unfaithful ones, and does a typed judgment do better?
 
 ## Method
@@ -88,29 +88,18 @@ The script always creates its own unique temporary database, overrides any
 inherited or `.env` database path, and removes its scratch directory on completion
 or failure. It does not use a caller-supplied ledger path.
 
-`gate-e2e.mjs` drives the real MCP surface: one claim, one set of axioms, one Z3
-proof, two glosses. Z3 returns `proved` both times.
+The current `gate-e2e.mjs` drives the real MCP surface with a fixed claim and
+caller gloss, but different formulas. Both proofs succeed. Fidelity must accept
+the matching generated conditional and reject the reversed implication. A third
+case changes only the caller note; its rendering and fidelity must stay the same.
+Every case must refuse before review. The script records **synthetic test
+attestations** in its scratch ledger to exercise the post-review gate; these
+are not independent semantic validation.
 
-The numbers below are historical live measurements. The current gate also
-requires a settled decision, and records raw draws and model provenance. It
-checks claim/gloss agreement; the example assumes the English rendering of the
-formula was supplied correctly and does not validate that translation step.
-
-```
-PASS faithful:   proof=proved fidelity=0.69 (judgment, equivalent)     committed=true
-PASS unfaithful: proof=proved fidelity=0.15 (judgment, scope_differs)  committed=false
-```
-
-The unfaithful gloss swaps a necessary condition for a sufficient one — the same
-inversion the embedding channel rated 0.9796. Before the fidelity leg existed,
-both of these committed on the strength of the same sound proof.
-
-Two observations worth keeping rather than smoothing over. The faithful gloss
-scored 0.69 and 0.61 on two runs of the same pair: real glosses land far closer
-to the 0.6 floor than the 0.77–0.98 of the authored set, so the margin is
-thinner than the probe suggests, and the floor deserves calibration against
-glosses collected from real sessions. The judgment also varies run to run, so a
-number near the floor should be treated as near the floor, not as a verdict.
+The original same-proof/two-gloss experiment produced faithful scores 0.61–0.69
+and unfaithful scores 0.13–0.15. Those are historical measurements of caller
+English, not calibration of the new renderer. Do not reuse them as validation
+of the new formula-bound channel. See [the translation design](../../docs/formula-translation.md).
 
 ## Limits
 

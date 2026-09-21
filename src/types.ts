@@ -88,6 +88,7 @@ export interface VerifyResult {
   unsat_core?: string[];
   /** Set when a proof was obtained under declared strengthenings (interpretation-relative). */
   strengthened_proof?: true;
+  translation?: FormulaTranslation;
   elapsed_ms: number;
 }
 
@@ -126,7 +127,7 @@ export interface Formalization {
   backend: string;
   result: string;
   proof_confidence: number | null;
-  /** Claim/gloss agreement, not verification that the gloss renders the formula. */
+  /** Agreement between claim and server-rendered conditional formal statement. */
   fidelity: number | null;
   fidelity_method: string | null;
   fidelity_samples: number | null;
@@ -139,7 +140,10 @@ export interface Formalization {
   fidelity_decision: FidelityDecision | null;
   /** JSON provenance; decoded by getFormalizations. */
   fidelity_provenance: string | null;
+  /** Original caller note; never used as fidelity evidence. */
   gloss: string | null;
+  /** JSON of the AST-derived rendering and its binding evidence. */
+  translation: string | null;
   /** JSON array of declared strengthenings (UF interpretations, bounds); null if faithful. */
   strengthenings: string | null;
   created_at: string;
@@ -155,4 +159,20 @@ export interface Claim {
   tags: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Server-produced rendering of the exact ASTs passed to the prover. */
+export interface FormulaTranslation {
+  status: "supported" | "unsupported";
+  revision: string;
+  input_digest: string;
+  reason?: string;
+  generated_gloss: string | null;
+  assumptions: string[];
+  conclusion: string | null;
+  canonical_axioms: string[];
+  canonical_conjecture: string;
+  symbols: Array<{ key: string; signature: string; meaning: string | null }>;
+  missing_meanings: string[];
+  premise_consistency: "sat" | "unsat" | "unknown";
 }

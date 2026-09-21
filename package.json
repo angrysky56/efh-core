@@ -4,7 +4,8 @@
   "description": "Consolidated EFH reasoning server: claim store, formal verification (Z3 / optional Prover9), sheaf ADMM consistency enforcement, gated commits",
   "type": "module",
   "bin": {
-    "efh-core": "dist/index.js"
+    "efh-core": "dist/index.js",
+    "review-formalization": "dist/review-cli.js"
   },
   "main": "dist/index.js",
   "engines": {
@@ -15,7 +16,8 @@
     "start": "node dist/index.js",
     "smoke": "node test/smoke.mjs",
     "test": "node --test test/*.test.mjs",
-    "calibrate": "node test/calibrate.mjs"
+    "calibrate": "node test/calibrate.mjs",
+    "review:formalization": "node dist/review-cli.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

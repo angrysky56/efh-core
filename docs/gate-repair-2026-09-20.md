@@ -1,5 +1,7 @@
 # Gate repair follow-up — 2026-09-20
 
+> Subsequent implementation: [parser-backed formula translation and operator review](formula-translation.md) closes the caller-gloss substitution path. The limits and live results below describe the earlier repair.
+
 This follow-up repairs the implementation defects found in the second review.
 It preserves the 0.6 default fidelity floor, the separate opt-in for judgment in
 the consistency monitor, and the decision to record self-reported confidence

@@ -18,7 +18,7 @@ skills (host agent)                    efh-core server (one process)
   efh-loop ─ operating loop      ┌── claim store ── SQLite: claims, links, audit
   via-negativa ─ subtraction ────┤── verifier ──── Z3 (WASM, lazy) | Prover9/Mace4 (optional)
   got-patterns ─ branch/merge    │── enforcer ──── ADMM cycles, H¹ detection, recovery
-  ethical-triage ─ Paraclete ────┘── gate ──────── commit ⇔ pc≥0.7 ∧ settled fidelity≥floor ∧ KERNEL1
+  ethical-triage ─ Paraclete ────┘── gate ──────── commit ⇔ pc≥0.7 ∧ settled fidelity≥floor ∧ reviewed translation ∧ KERNEL1
 ```
 
 ## Honest labeling (epistemic status)
@@ -66,7 +66,7 @@ onto the same edge-space key names (`edge_claim`, `edge_confidence`,
 | `trigger_recovery` | soft_relax / admm_reset / kernel_retreat / re_partition / fusion |
 | `set_restriction_map` | Wire a directed edge's projection (compare: hash \| semantic) |
 | `reset_session` | Clean enforcer slate; claims and audit persist |
-| `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ settled fidelity ≥ floor ∧ KERNEL1 (`reported_confidence` is recorded, not a leg) |
+| `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ settled fidelity ≥ floor ∧ reviewed translation ∧ KERNEL1 (`reported_confidence` is recorded, not a leg) |
 | `session_status` | Health: claim counts, enforcer summary, backend availability |
 
 Each row in `formalizations` records how its fidelity number was reached:
@@ -119,19 +119,27 @@ calibration is a deployment decision — see Calibration below.
 
 ## Verification soundness rules
 
-- **Unsat cores.** Assertions are auto-named; `proved`/`unsat` results return
+- **Unsat cores.** Implication/counterexample assertions use fresh tracking literals; `proved`/`unsat` results return
   the asserted lines that carried the proof. A core omitting an axiom you
   consider essential signals a possibly vacuous proof (e.g., inconsistent
   premises) — inspect before trusting.
-- **Formalization fidelity.** Claim-bound verifications persist their full
-  encoding (axioms, conjecture, result) in the `formalizations` table. The
-  verify tools accept a `gloss` — an English rendering of what the axioms +
-  conjecture literally say, not a copy of the claim. The server compares the
-  gloss with the claim using Jev when enabled, otherwise embedding similarity.
-  This does not verify the formula-to-gloss translation: that remains a caller
-  trust assumption, reported by verification and commit tools. Missing, failed,
-  unsettled, or historical undecided fidelity blocks commitment unless the
-  explicitly reported `EFH_GATE_FIDELITY=off` override is set.
+- **Formalization fidelity.** `verify_implication` and `find_counterexample`
+  parse one packaged AST using Z3, then pass the same nodes to rendering and
+  solving. Declarations precede assertions; solver-control commands and injected
+  conjecture scripts are rejected. Definitions and `let` bindings are expanded
+  by Z3. The server-generated English includes every premise and the goal.
+  `gloss` remains a caller note, never a fidelity input. Unsupported AST operators
+  or sorts cannot produce a fidelity measurement.
+- **Translation review.** `translation` stores canonical formulas, generated
+  text, symbol meanings, renderer revision, raw-input digest and the premise
+  consistency result. `translation_reviews` stores attributed local operator
+  attestations bound to a digest of the exact claim and formalization, including
+  fidelity evidence. No MCP tool writes approvals. Unsupported translations,
+  missing meanings, inconsistent/unknown premises, absent or stale reviews all
+  refuse commitment, including when `EFH_GATE_FIDELITY=off`. Rejection removes
+  an existing commitment, preserving the proof and audit history. See
+  [formula translation and review](formula-translation.md) for the workflow,
+  supported subset, trust boundary, and tests.
 - **Strengthenings cap.** Declaring `strengthenings` (concrete `define-fun`
   interpretations for uninterpreted functions, bounds, finitizations) enforces
   the logical asymmetry: models and refutations under strengthening remain
@@ -204,6 +212,9 @@ Measured on `nomic-embed-text` (n small; re-run on your setup):
 ```
 src/
   index.ts            entry, stdio transport, shutdown persistence
+  translation.ts      Z3 framing and controlled-English AST renderer
+  translation-review.ts exact-artifact operator attestations and validation
+  review-cli.ts       local inspection and review recording (outside MCP)
   tools.ts            all 16 tool registrations, facet auto-registration, fidelity
   store.ts            claims, links, audit, formalizations, THE GATE
   verifier.ts         Z3 (lazy WASM), naming/cores, strengthenings cap, LADR shell-out

@@ -2,12 +2,12 @@
  * Claim store, audit trail, and the commit gate.
  *
  * The commit rule (structural, not advisory):
- *   commit ⇔ proof_confidence ≥ 0.7 ∧ fidelity ≥ 0.6 ∧ status = KERNEL1
+ *   commit ⇔ proof_confidence ≥ 0.7 ∧ fidelity ≥ 0.6 ∧ reviewed translation ∧ status = KERNEL1
  *
- * The gate combines a prover result, claim/gloss agreement, and the monitor's
- * state. The supplied axioms and formula-to-gloss translation remain trust
- * assumptions. The reasoner's stated confidence is recorded in the
- * audit trail for calibration, and is deliberately NOT a leg — a number the
+ * The gate combines proof, fidelity of the parsed rendering, translation review,
+ * and the monitor state. Reviews attest symbol grounding and premise scope;
+ * they do not establish real-world truth by themselves. The reasoner's stated
+ * confidence is recorded in the audit trail for calibration, and is deliberately NOT a leg — a number the
  * author supplies about its own output cannot verify that output, and counting
  * it as a check inflated the gate's apparent independence.
  * Refusals are normal results (committed:false + reason + recovery
@@ -15,9 +15,11 @@
  */
 
 import type Database from "better-sqlite3";
-import type { Claim, ClosureStatus, Formalization, RecoveryRecommendation, FidelityDecision, FidelityProvenance } from "./types.js";
+import type { Claim, ClosureStatus, Formalization, RecoveryRecommendation, FidelityDecision, FidelityProvenance, FormulaTranslation } from "./types.js";
 import { config } from "./config.js";
 import { GLOSS_TRUST_NOTE, FIDELITY_POLICY_REVISION } from "./fidelity.js";
+
+import { translationReviewStatus } from "./translation-review.js";
 
 const MIN_CONFIDENCE = config.commitMinConfidence;
 const FIDELITY_MIN = config.fidelityMin;
@@ -144,7 +146,9 @@ export interface CommitOutcome {
     fidelity_split: boolean | null;
     fidelity_provenance: FidelityProvenance | null;
     fidelity_policy_ok: boolean;
-    translation_assurance: "caller-supplied-unverified";
+    translation_assurance: "parser-backed-reviewed" | "unverified";
+    translation_ok: boolean;
+    translation_review: ReturnType<typeof translationReviewStatus> | null;
     trust_note: string;
     fidelity_samples?: number | null;
     fidelity_spread?: [number, number] | null;
@@ -158,7 +162,7 @@ export interface CommitOutcome {
 }
 
 /**
- * THE GATE. All three conditions must hold; anything else is a refusal.
+ * THE GATE. All four conditions must hold; anything else is a refusal.
  * A refusal is not an error — it is the consistency check working.
  * The reasoner's stated confidence is recorded, not counted.
  */
@@ -172,111 +176,121 @@ export function commitClaim(
   /** Which estimator produced reportedConfidence, so estimators can be compared. */
   confidenceSource: string = "verbalized",
 ): CommitOutcome {
-  const claim = getClaim(db, claimId);
-  if (!claim) throw new Error(`Claim ${claimId} does not exist`);
+  // Hold one write transaction across evidence/review checks and the audit +
+  // status update, so a concurrent local review cannot invalidate an approval
+  // between checking it and committing the claim.
+  return db.transaction((): CommitOutcome => {
+    const claim = getClaim(db, claimId);
+    if (!claim) throw new Error(`Claim ${claimId} does not exist`);
 
-  const pc = claim.proof_confidence ?? 0;
-  // The formalization that carried the proof. A proof establishes that the
-  // conjecture follows from the axioms; it says nothing about whether those
-  // formulas mean what the claim means. Fidelity compares the supplied gloss
-  // with the claim; translating the formula into that gloss remains unverified.
-  const formalization = db
-    .prepare("SELECT * FROM formalizations WHERE claim_id = ? ORDER BY id DESC LIMIT 1")
-    .get(claimId) as Formalization | undefined;
-  const fidelity = formalization?.fidelity ?? null;
-  const fidelityMethod = formalization?.fidelity_method ?? null;
-  const provenance = formalization?.fidelity_provenance
-    ? JSON.parse(formalization.fidelity_provenance) as FidelityProvenance : null;
-  // A decision at a different floor may have samples on both sides of today's
-  // floor. Do not reinterpret a stored median as a fresh settled measurement.
-  const policyOk = provenance?.policy_revision === FIDELITY_POLICY_REVISION && provenance.boundary === FIDELITY_MIN;
-  const gate = {
-    proof_confidence_ok: pc >= MIN_CONFIDENCE,
-    kernel1_ok: closureStatus === "KERNEL1",
-    // An unmeasured comparison never counts as a passed comparison.
-    fidelity_ok: !FIDELITY_GATE || (
-      fidelity !== null && Number.isFinite(fidelity) && fidelity >= FIDELITY_MIN && fidelity <= 1 &&
-      policyOk && formalization?.fidelity_decision === "passed" &&
-      formalization.fidelity_unsettled !== 1 && formalization.fidelity_split !== 1
-    ),
-    min_confidence: MIN_CONFIDENCE,
-    fidelity,
-    fidelity_method: fidelityMethod,
-    formalization_id: formalization?.id ?? null,
-    fidelity_decision: formalization?.fidelity_decision ?? null,
-    fidelity_samples: formalization?.fidelity_samples ?? null,
-    fidelity_spread: formalization?.fidelity_spread_low != null && formalization.fidelity_spread_high != null
-      ? [formalization.fidelity_spread_low, formalization.fidelity_spread_high] as [number, number] : null,
-    fidelity_unsettled: formalization?.fidelity_unsettled == null ? null : formalization.fidelity_unsettled === 1,
-    fidelity_split: formalization?.fidelity_split == null ? null : formalization.fidelity_split === 1,
-    fidelity_provenance: provenance,
-    fidelity_policy_ok: policyOk,
-    translation_assurance: "caller-supplied-unverified" as const,
-    trust_note: GLOSS_TRUST_NOTE,
-    fidelity_min: FIDELITY_MIN,
-    fidelity_gate: FIDELITY_GATE ? ("on" as const) : ("off" as const),
-    ...(fidelityMethod === "embedding"
-      ? {
-          fidelity_caveat:
-            "measured by embedding similarity, which reads topical overlap and cannot see negation or quantifier scope — set EFH_JUDGE=jev for a typed judgment",
-        }
-      : {}),
-  };
+    const pc = claim.proof_confidence ?? 0;
+    // The formalization that carried the proof. A proof establishes that the
+    // conjecture follows from the axioms; it says nothing about whether those
+    // formulas mean what the claim means. Fidelity compares the parsed rendering;
+    // review separately grounds the symbol meanings and premise scope.
+    const formalization = db
+      .prepare("SELECT * FROM formalizations WHERE claim_id = ? ORDER BY id DESC LIMIT 1")
+      .get(claimId) as Formalization | undefined;
+    const fidelity = formalization?.fidelity ?? null;
+    const fidelityMethod = formalization?.fidelity_method ?? null;
+    const provenance = formalization?.fidelity_provenance
+      ? JSON.parse(formalization.fidelity_provenance) as FidelityProvenance : null;
+    // A decision at a different floor may have samples on both sides of today's
+    // floor. Do not reinterpret a stored median as a fresh settled measurement.
+    const policyOk = provenance?.policy_revision === FIDELITY_POLICY_REVISION && provenance.boundary === FIDELITY_MIN;
+    const review = formalization ? translationReviewStatus(db, formalization.id) : null;
+    const gate = {
+      proof_confidence_ok: pc >= MIN_CONFIDENCE && (formalization?.proof_confidence ?? 0) >= MIN_CONFIDENCE &&
+        ["proved", "unsat"].includes(formalization?.result ?? ""),
+      translation_ok: review?.ok === true,
+      translation_review: review,
+      kernel1_ok: closureStatus === "KERNEL1",
+      // An unmeasured comparison never counts as a passed comparison.
+      fidelity_ok: !FIDELITY_GATE || (
+        fidelity !== null && Number.isFinite(fidelity) && fidelity >= FIDELITY_MIN && fidelity <= 1 &&
+        policyOk && formalization?.fidelity_decision === "passed" &&
+        formalization.fidelity_unsettled !== 1 && formalization.fidelity_split !== 1
+      ),
+      min_confidence: MIN_CONFIDENCE,
+      fidelity,
+      fidelity_method: fidelityMethod,
+      formalization_id: formalization?.id ?? null,
+      fidelity_decision: formalization?.fidelity_decision ?? null,
+      fidelity_samples: formalization?.fidelity_samples ?? null,
+      fidelity_spread: formalization?.fidelity_spread_low != null && formalization.fidelity_spread_high != null
+        ? [formalization.fidelity_spread_low, formalization.fidelity_spread_high] as [number, number] : null,
+      fidelity_unsettled: formalization?.fidelity_unsettled == null ? null : formalization.fidelity_unsettled === 1,
+      fidelity_split: formalization?.fidelity_split == null ? null : formalization.fidelity_split === 1,
+      fidelity_provenance: provenance,
+      fidelity_policy_ok: policyOk,
+      translation_assurance: review?.ok ? "parser-backed-reviewed" as const : "unverified" as const,
+      trust_note: GLOSS_TRUST_NOTE,
+      fidelity_min: FIDELITY_MIN,
+      fidelity_gate: FIDELITY_GATE ? ("on" as const) : ("off" as const),
+      ...(fidelityMethod === "embedding"
+        ? {
+            fidelity_caveat:
+              "measured by embedding similarity, which reads topical overlap and cannot see negation or quantifier scope — set EFH_JUDGE=jev for a typed judgment",
+          }
+        : {}),
+    };
 
-  if (claim.status === "refuted") {
-    audit(db, "gate", "commit_refused", claimId, { reason: "claim is refuted", reportedConfidence, confidenceSource, gate });
+    if (claim.status === "refuted") {
+      audit(db, "gate", "commit_refused", claimId, { reason: "claim is refuted", reportedConfidence, confidenceSource, gate });
+      return {
+        committed: false,
+        claim_id: claimId,
+        reason: "Claim has been refuted by the verifier — cannot commit.",
+        closure_status: closureStatus,
+        gate,
+      };
+    }
+
+    if (gate.proof_confidence_ok && gate.kernel1_ok && gate.fidelity_ok && gate.translation_ok) {
+      db.prepare(
+        "UPDATE claims SET status = 'committed', updated_at = datetime('now') WHERE id = ?",
+      ).run(claimId);
+      audit(db, "gate", "commit", claimId, { reportedConfidence, confidenceSource, closureStatus, gate });
+      return {
+        committed: true,
+        claim_id: claimId,
+        reason: "All gate conditions satisfied.",
+        closure_status: closureStatus,
+        gate,
+      };
+    }
+
+    const failures: string[] = [];
+    if (!gate.proof_confidence_ok) {
+      failures.push(`the claim and its latest formalization need a successful proof at confidence >= ${MIN_CONFIDENCE} (claim: ${pc}, formalization: ${formalization?.proof_confidence ?? "missing"})`);
+    }
+    if (!gate.kernel1_ok) {
+      failures.push(`closure_status is ${closureStatus}, not KERNEL1`);
+    }
+    if (!gate.translation_ok) failures.push(review?.reason ?? "translation unverified: reverify with supported formulas and obtain an independent review");
+    if (!gate.fidelity_ok) {
+      failures.push(
+        fidelity === null
+          ? "formalization fidelity unmeasured (verify with a supported formula rendering); an unmeasured check never counts as a passed check"
+          : formalization?.fidelity_decision === "unsettled" || formalization?.fidelity_unsettled === 1 || formalization?.fidelity_split === 1
+            ? "fidelity judgment is unsettled (conflicting samples, answers, or model builds); reverify or reformalize"
+            : !formalization?.fidelity_decision
+              ? "historical fidelity has no recorded decision; reverify with a supported formula rendering under the current policy"
+              : !policyOk
+                ? "fidelity evidence uses a different or missing policy/floor; reverify with a supported formula rendering under the current configuration"
+                : `fidelity ${fidelity} does not pass the ${FIDELITY_MIN} floor and recorded decision (${formalization.fidelity_decision}); reformalize`,
+      );
+    }
+    audit(db, "gate", "commit_refused", claimId, { failures, reportedConfidence, confidenceSource, gate });
     return {
       committed: false,
       claim_id: claimId,
-      reason: "Claim has been refuted by the verifier — cannot commit.",
+      reason: `Commit refused: ${failures.join("; ")}. This is the consistency check working, not an error.`,
       closure_status: closureStatus,
       gate,
+      recovery_recommendation: recovery,
     };
-  }
-
-  if (gate.proof_confidence_ok && gate.kernel1_ok && gate.fidelity_ok) {
-    db.prepare(
-      "UPDATE claims SET status = 'committed', updated_at = datetime('now') WHERE id = ?",
-    ).run(claimId);
-    audit(db, "gate", "commit", claimId, { reportedConfidence, confidenceSource, closureStatus, gate });
-    return {
-      committed: true,
-      claim_id: claimId,
-      reason: "All gate conditions satisfied.",
-      closure_status: closureStatus,
-      gate,
-    };
-  }
-
-  const failures: string[] = [];
-  if (!gate.proof_confidence_ok) {
-    failures.push(`proof_confidence ${pc.toFixed(2)} < ${MIN_CONFIDENCE} (verify the claim first)`);
-  }
-  if (!gate.kernel1_ok) {
-    failures.push(`closure_status is ${closureStatus}, not KERNEL1`);
-  }
-  if (!gate.fidelity_ok) {
-    failures.push(
-      fidelity === null
-        ? "formalization fidelity unmeasured (verify with a gloss); an unmeasured check never counts as a passed check"
-        : formalization?.fidelity_decision === "unsettled" || formalization?.fidelity_unsettled === 1 || formalization?.fidelity_split === 1
-          ? "fidelity judgment is unsettled (conflicting samples, answers, or model builds); reverify or reformalize"
-          : !formalization?.fidelity_decision
-            ? "historical fidelity has no recorded decision; reverify with a gloss under the current policy"
-            : !policyOk
-              ? "fidelity evidence uses a different or missing policy/floor; reverify with a gloss under the current configuration"
-              : `fidelity ${fidelity} does not pass the ${FIDELITY_MIN} floor and recorded decision (${formalization.fidelity_decision}); reformalize`,
-    );
-  }
-  audit(db, "gate", "commit_refused", claimId, { failures, reportedConfidence, confidenceSource, gate });
-  return {
-    committed: false,
-    claim_id: claimId,
-    reason: `Commit refused: ${failures.join("; ")}. This is the consistency check working, not an error.`,
-    closure_status: closureStatus,
-    gate,
-    recovery_recommendation: recovery,
-  };
+  }).immediate();
 }
 
 /** Persist the formal encoding behind a verification — the reviewable artifact. */
@@ -297,12 +311,13 @@ export function saveFormalization(
     fidelity_split?: boolean | null;
     fidelity_decision?: FidelityDecision | null;
     fidelity_provenance?: FidelityProvenance | null;
+    translation?: FormulaTranslation | null;
     gloss: string | null;
     strengthenings: string[] | null;
   },
 ): void {
   db.prepare(
-    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, fidelity_samples, fidelity_spread_low, fidelity_spread_high, fidelity_unsettled, fidelity_split, fidelity_decision, fidelity_provenance, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, fidelity_samples, fidelity_spread_low, fidelity_spread_high, fidelity_unsettled, fidelity_split, fidelity_decision, fidelity_provenance, gloss, strengthenings, translation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     f.claim_id,
     JSON.stringify(f.axioms),
@@ -321,6 +336,7 @@ export function saveFormalization(
     f.fidelity_provenance ? JSON.stringify(f.fidelity_provenance) : null,
     f.gloss,
     f.strengthenings ? JSON.stringify(f.strengthenings) : null,
+    f.translation ? JSON.stringify(f.translation) : null,
   );
 }
 
@@ -328,8 +344,10 @@ export function getFormalizations(
   db: Database.Database,
   claimId: number,
 ): Array<
-  Omit<Formalization, "axioms" | "strengthenings" | "fidelity_provenance"> & {
+  Omit<Formalization, "axioms" | "strengthenings" | "fidelity_provenance" | "translation"> & {
     axioms: string[];
+    translation: FormulaTranslation | null;
+    translation_review: ReturnType<typeof translationReviewStatus>;
     strengthenings: string[] | null;
     fidelity_provenance: FidelityProvenance | null;
   }
@@ -339,6 +357,8 @@ export function getFormalizations(
     .all(claimId) as Formalization[];
   return rows.map((r) => ({
     ...r,
+    translation: r.translation ? JSON.parse(r.translation) as FormulaTranslation : null,
+    translation_review: translationReviewStatus(db, r.id),
     axioms: JSON.parse(r.axioms) as string[],
     strengthenings: r.strengthenings ? (JSON.parse(r.strengthenings) as string[]) : null,
     fidelity_provenance: r.fidelity_provenance ? JSON.parse(r.fidelity_provenance) as FidelityProvenance : null,

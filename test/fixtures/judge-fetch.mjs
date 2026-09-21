@@ -9,7 +9,7 @@ globalThis.fetch = async (url, init) => {
   const request = JSON.parse(init.body);
   const sequence = JSON.parse(process.env.TEST_JUDGE_DRAWS ?? '[{"noul":0.95}]');
   const sample = process.env.TEST_JUDGE_MODE === 'e2e'
-    ? request.state.item.b.includes('enough') ? {noul: 0.13, relation: 'scope_differs'} : {noul: 0.95}
+    ? request.state.item.b.includes('then (the claim is committed).') ? {noul: 0.13, relation: 'scope_differs'} : {noul: 0.95}
     : sequence[Math.min(calls++, sequence.length - 1)];
   const relation = sample.relation ?? 'equivalent';
   return new Response(JSON.stringify({

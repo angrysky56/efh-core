@@ -22,28 +22,25 @@ hypothesized, not proven, to track closure. Say "verified within closure bounds,
 3. **VERIFY** — `verify_implication` (SMT-LIB axioms + conjecture, pass `claim_id`) or
    `find_counterexample`. Formalize the *structure* of the claim; if it cannot be
    formalized, say so and treat belief as capped at 0.6.
-   **Gloss discipline** (the formalization is the weakest link): after writing the
-   axioms, write a `gloss` — an English statement of what the encoding literally says,
-   from the formalization alone, without re-reading the claim. Pass it with the call.
-   `fidelity_warning: true` means your encoding may not say what the claim says —
-   reformalize, don't argue. `proved` results include `unsat_core`: the axioms that
-   carried the proof. If the core omits an axiom you consider essential, the proof may
-   be vacuous (e.g., inconsistent premises) — inspect before trusting. Audit past
-   encodings with `get_formalizations(claim_id)`.
+   Supply `symbol_glossary` meanings for every used symbol and sort; predicates
+   and functions use `{0}`, `{1}`, etc. for their arguments. The server generates
+   a rendering from the actual Z3 formulas; the optional caller `gloss` is only
+   a note. Inspect the generated assumptions and conclusion in
+   `get_formalizations(claim_id)`. Unsupported rendering or inconsistent premises
+   blocks commitment. `proved` results include the relevant `unsat_core`.
+   A separate operator must review the meanings and premise justifications using
+   the local review CLI. Do not fabricate or self-author an independent review.
 4. **MONITOR** — `register_agent_state` as `"reasoner"`:
    `{current_hypothesis, confidence_score, halt_flag, verified_claim?}`. Report your real
    confidence, not aspiration.
 5. **ENFORCE** — every 2–3 tool calls: `run_admm_cycle`, then `get_closure_status`.
 6. **COMMIT** — `commit_claim(claim_id, reported_confidence)`. The gate enforces:
-   proof_confidence ≥ 0.7 ∧ settled claim/gloss fidelity ≥ the floor ∧ status = KERNEL1.
-   Axioms and formula-to-gloss translation remain trust assumptions; `reported_confidence` is recorded for
-   calibration and does not affect the outcome, so state it honestly rather than
-   tactically. Verify with a `gloss` or fidelity stays unmeasured, which fails the
-   gate. Conflicting draws/answers or mixed model versions also refuse. Historical
-   fidelity without a recorded decision needs a new verification. The server does
-   not establish that the supplied gloss renders the formula; inspect that link
-   and the axioms before trusting the commit. A refusal is the system working —
-   read the reason, do not retry blindly.
+   proof_confidence ≥ 0.7 ∧ settled claim/rendered-formula fidelity ≥ the floor
+   ∧ a current independent translation review ∧ status = KERNEL1.
+   `reported_confidence` is audit data, not a gate condition. Any new verification
+   needs a new review, bound to that exact artifact. Disabling fidelity scoring
+   does not disable translation review. A refusal is the system working — read
+   the reason and address it; do not retry blindly or manufacture approval.
 7. **ITERATE** — refine from proof results; loop.
 
 Session start: `reset_session(confirm=true)`. Claims persist; enforcer state does not.
@@ -52,7 +49,7 @@ Session start: `reset_session(confirm=true)`. Claims persist; enforcer state doe
 
 | Status | Action |
 |---|---|
-| KERNEL1 | Proceed; commit freely. |
+| KERNEL1 | Proceed; commit when proof, fidelity and translation review also pass. |
 | WEAK | Verify every claim before committing; increase verification frequency. |
 | WARNING | Halt commits. Re-verify claims made since last KERNEL1. |
 | TIMEOUT | Stop. Execute recovery. Commit nothing until KERNEL1 restored. |

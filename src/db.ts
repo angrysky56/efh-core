@@ -68,8 +68,17 @@ CREATE TABLE IF NOT EXISTS formalizations (
   fidelity_decision TEXT,
   fidelity_provenance TEXT,
   gloss TEXT,
+  translation TEXT,
   strengthenings TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS translation_reviews (
+  formalization_id INTEGER PRIMARY KEY REFERENCES formalizations(id),
+  digest TEXT NOT NULL,
+  decision TEXT NOT NULL CHECK (decision IN ('approved','rejected')),
+  reviewer TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  reviewed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_audit_claim ON audit(claim_id);
@@ -116,6 +125,7 @@ function migrate(db: Database.Database): void {
     ["fidelity_split", "INTEGER"],
     ["fidelity_decision", "TEXT"],
     ["fidelity_provenance", "TEXT"],
+    ["translation", "TEXT"],
   ] as const) {
     if (!cols.some((c) => c.name === name)) db.exec(`ALTER TABLE formalizations ADD COLUMN ${name} ${type}`);
   }
