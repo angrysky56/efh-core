@@ -14,15 +14,14 @@
  * not run never counts as a comparison that passed. Off by default.
  */
 
+import { createHash } from "node:crypto";
+import { config } from "./config.js";
+import { fidelityDecision, FIDELITY_POLICY_REVISION } from "./fidelity.js";
+import type { FidelityDecision, FidelityDraw, FidelityProvenance } from "./types.js";
+
 const ENDPOINTS = {
   typesafe: "https://api.typesafe.ai/v1/systemone",
   openrouter: "https://openrouter.ai/api/alpha/decisions",
-} as const;
-
-/** Floating aliases; both providers resolve to a concrete build and report it. */
-const DEFAULT_MODELS = {
-  typesafe: "jev-latest",
-  openrouter: "~typesafe/jev-latest",
 } as const;
 
 export type JudgeProvider = keyof typeof ENDPOINTS;
@@ -40,10 +39,12 @@ export interface EquivalenceJudgment {
   relation: string;
   /** The judge's confidence in that relation label. */
   relation_confidence: number;
-  /** Concrete model build that served the request. */
-  model: string;
+  /** Single resolved model, or null when draws span multiple builds. */
+  model: string | null;
   /** True when the two questions disagree: a hard case, not a verdict. */
   split: boolean;
+  decision: FidelityDecision;
+  provenance: FidelityProvenance;
 }
 
 export class JudgeUnavailableError extends Error {
@@ -69,26 +70,21 @@ export class JudgeUnavailableError extends Error {
  * Calls are cheap, correctness at the threshold is not.
  */
 export function judgeBoundary(): number {
-  return Number(process.env.EFH_FIDELITY_MIN ?? 0.6);
+  return config.fidelityMin;
 }
 export function judgeBand(): number {
-  return Number(process.env.EFH_JUDGE_BAND ?? 0.15);
+  return config.judgeBand;
 }
 export function judgeSamples(): number {
-  const n = Number(process.env.EFH_JUDGE_SAMPLES ?? 5);
-  return Number.isFinite(n) && n >= 1 ? Math.min(Math.floor(n), 15) : 5;
+  return config.judgeSamples;
 }
 
 export function judgeEnabled(): boolean {
-  return (process.env.EFH_JUDGE ?? "off").toLowerCase() === "jev";
+  return config.judgeEnabled;
 }
 
 export function judgeProvider(): JudgeProvider {
-  const p = (process.env.EFH_JUDGE_PROVIDER ?? "typesafe").toLowerCase();
-  if (p !== "typesafe" && p !== "openrouter") {
-    throw new JudgeUnavailableError(`EFH_JUDGE_PROVIDER must be typesafe or openrouter, got '${p}'`);
-  }
-  return p;
+  return config.judgeProvider;
 }
 
 function apiKey(provider: JudgeProvider): string | undefined {
@@ -126,6 +122,9 @@ const QUESTIONS = {
   },
 } as const;
 
+/** Changes automatically when any question wording or criterion changes. */
+export const QUESTION_REVISION = createHash("sha256").update(JSON.stringify(QUESTIONS)).digest("hex");
+
 export class Judge {
   private mem = new Map<string, EquivalenceJudgment>();
 
@@ -139,7 +138,7 @@ export class Judge {
       return {
         enabled: true,
         provider,
-        model: process.env.EFH_JUDGE_MODEL ?? DEFAULT_MODELS[provider],
+        model: config.judgeModel,
         key_configured: Boolean(apiKey(provider)),
       };
     } catch {
@@ -148,11 +147,11 @@ export class Judge {
   }
 
   /** One provider call. The caller decides how many of these a decision is worth. */
-  private async sample(a: string, b: string): Promise<{ noul: number; relation: string; confidence: number; model: string }> {
+  private async sample(a: string, b: string): Promise<FidelityDraw> {
     const provider = judgeProvider();
     const secret = apiKey(provider);
     if (!secret) throw new JudgeUnavailableError(`no key for provider '${provider}'`);
-    const model = process.env.EFH_JUDGE_MODEL ?? DEFAULT_MODELS[provider];
+    const model = config.judgeModel;
 
     let res: Awaited<ReturnType<typeof fetch>>;
     try {
@@ -164,14 +163,23 @@ export class Judge {
         signal: AbortSignal.timeout(20_000),
       });
     } catch (err) {
-      throw new JudgeUnavailableError(String(err));
+      throw new JudgeUnavailableError(String(err).replaceAll(secret, "[REDACTED]"));
     }
     if (!res.ok) {
       const body = (await res.text().catch(() => "")).replaceAll(secret, "[REDACTED]");
       throw new JudgeUnavailableError(`provider returned HTTP ${res.status} ${body.slice(0, 300)}`);
     }
 
-    const data = (await res.json()) as {
+    let raw: unknown;
+    try {
+      raw = await res.json();
+    } catch {
+      throw new JudgeUnavailableError("provider returned invalid JSON");
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new JudgeUnavailableError("provider returned a malformed judgment");
+    }
+    const data = raw as {
       model?: string;
       answers?: {
         relation?: { choice?: string; confidence?: number };
@@ -181,10 +189,13 @@ export class Judge {
     const noul = data.answers?.same_truth_conditions?.noul;
     const relation = data.answers?.relation?.choice;
     const confidence = data.answers?.relation?.confidence;
-    if (typeof noul !== "number" || noul < 0 || noul > 1 || typeof relation !== "string") {
+    if (typeof noul !== "number" || !Number.isFinite(noul) || noul < 0 || noul > 1 ||
+        typeof relation !== "string" || !Object.hasOwn(QUESTIONS.relation.criteria, relation) ||
+        typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 ||
+        typeof data.model !== "string" || !data.model.trim() || data.model.startsWith("~") || /(^|[-/])latest$/.test(data.model)) {
       throw new JudgeUnavailableError("provider returned a malformed judgment");
     }
-    return { noul, relation, confidence: typeof confidence === "number" ? confidence : 0, model: data.model ?? model };
+    return { noul, relation, confidence, model: data.model };
   }
 
   /**
@@ -197,7 +208,7 @@ export class Judge {
    * must not read as a passed one.
    */
   async equivalence(a: string, b: string): Promise<EquivalenceJudgment> {
-    const key = `${a}\u0000${b}`;
+    const key = JSON.stringify([a, b]);
     const hit = this.mem.get(key);
     if (hit) return hit;
 
@@ -226,17 +237,29 @@ export class Judge {
       draws.filter((d) => d.relation === relation).reduce((sum, d) => sum + d.confidence, 0) /
       draws.filter((d) => d.relation === relation).length;
 
+    // A modal label must not hide a conflicting draw. Mixed model versions are
+    // recorded but cannot establish a settled comparison under one instrument.
+    const split = draws.some((d) => (d.relation === "equivalent") !== (d.noul >= boundary));
+    const models = [...new Set(draws.map((d) => d.model))];
+    const mixedModels = models.length > 1;
+
     const judgment: EquivalenceJudgment = {
-      same_truth_conditions: Math.round(value * 10000) / 10000,
+      same_truth_conditions: value,
       relation,
-      relation_confidence: Math.round(relationConfidence * 10000) / 10000,
-      model: draws[0].model,
+      relation_confidence: relationConfidence,
+      model: models.length === 1 ? models[0] : null,
       samples: draws.length,
-      spread: [Math.round(low * 10000) / 10000, Math.round(high * 10000) / 10000],
+      spread: [low, high],
       unsettled,
       // The two questions are independent views of one pair. On the probe set the
       // only pair they split on (an inverse-fallacy gloss) was the hardest case.
-      split: (relation === "equivalent") !== value >= boundary,
+      split,
+      decision: fidelityDecision(value, boundary, unsettled || split || mixedModels),
+      provenance: {
+        provider: judgeProvider(), requested_model: config.judgeModel, resolved_models: models,
+        question_revision: QUESTION_REVISION, policy_revision: FIDELITY_POLICY_REVISION,
+        boundary, resample_band: band, resample_samples: judgeSamples(), draws, mixed_models: mixedModels,
+      },
     };
     this.mem.set(key, judgment);
     return judgment;

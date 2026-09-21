@@ -4,9 +4,9 @@
  * The commit rule (structural, not advisory):
  *   commit ⇔ proof_confidence ≥ 0.7 ∧ fidelity ≥ 0.6 ∧ status = KERNEL1
  *
- * Each leg is something the reasoner does not control: a prover result, an
- * independent comparison of the formalization against the claim, and the
- * monitor's own state. The reasoner's stated confidence is recorded in the
+ * The gate combines a prover result, claim/gloss agreement, and the monitor's
+ * state. The supplied axioms and formula-to-gloss translation remain trust
+ * assumptions. The reasoner's stated confidence is recorded in the
  * audit trail for calibration, and is deliberately NOT a leg — a number the
  * author supplies about its own output cannot verify that output, and counting
  * it as a check inflated the gate's apparent independence.
@@ -15,12 +15,14 @@
  */
 
 import type Database from "better-sqlite3";
-import type { Claim, ClosureStatus, Formalization, RecoveryRecommendation } from "./types.js";
+import type { Claim, ClosureStatus, Formalization, RecoveryRecommendation, FidelityDecision, FidelityProvenance } from "./types.js";
+import { config } from "./config.js";
+import { GLOSS_TRUST_NOTE, FIDELITY_POLICY_REVISION } from "./fidelity.js";
 
-const MIN_CONFIDENCE = Number(process.env.EFH_COMMIT_MIN_CONFIDENCE ?? 0.7);
-const FIDELITY_MIN = Number(process.env.EFH_FIDELITY_MIN ?? 0.6);
+const MIN_CONFIDENCE = config.commitMinConfidence;
+const FIDELITY_MIN = config.fidelityMin;
 /** The fidelity leg can be disabled, but never quietly: the gate says so in every outcome. */
-const FIDELITY_GATE = (process.env.EFH_GATE_FIDELITY ?? "on").toLowerCase() !== "off";
+const FIDELITY_GATE = config.fidelityGate;
 
 export function audit(
   db: Database.Database,
@@ -137,6 +139,13 @@ export interface CommitOutcome {
     min_confidence: number;
     fidelity: number | null;
     fidelity_method: string | null;
+    formalization_id: number | null;
+    fidelity_decision: FidelityDecision | null;
+    fidelity_split: boolean | null;
+    fidelity_provenance: FidelityProvenance | null;
+    fidelity_policy_ok: boolean;
+    translation_assurance: "caller-supplied-unverified";
+    trust_note: string;
     fidelity_samples?: number | null;
     fidelity_spread?: [number, number] | null;
     fidelity_unsettled?: boolean | null;
@@ -169,21 +178,41 @@ export function commitClaim(
   const pc = claim.proof_confidence ?? 0;
   // The formalization that carried the proof. A proof establishes that the
   // conjecture follows from the axioms; it says nothing about whether those
-  // formulas mean what the claim means. That is what fidelity measures, so it
-  // belongs in the gate rather than in a warning nobody has to read.
+  // formulas mean what the claim means. Fidelity compares the supplied gloss
+  // with the claim; translating the formula into that gloss remains unverified.
   const formalization = db
-    .prepare("SELECT fidelity, fidelity_method, gloss FROM formalizations WHERE claim_id = ? ORDER BY id DESC LIMIT 1")
-    .get(claimId) as { fidelity: number | null; fidelity_method: string | null; gloss: string | null } | undefined;
+    .prepare("SELECT * FROM formalizations WHERE claim_id = ? ORDER BY id DESC LIMIT 1")
+    .get(claimId) as Formalization | undefined;
   const fidelity = formalization?.fidelity ?? null;
   const fidelityMethod = formalization?.fidelity_method ?? null;
+  const provenance = formalization?.fidelity_provenance
+    ? JSON.parse(formalization.fidelity_provenance) as FidelityProvenance : null;
+  // A decision at a different floor may have samples on both sides of today's
+  // floor. Do not reinterpret a stored median as a fresh settled measurement.
+  const policyOk = provenance?.policy_revision === FIDELITY_POLICY_REVISION && provenance.boundary === FIDELITY_MIN;
   const gate = {
     proof_confidence_ok: pc >= MIN_CONFIDENCE,
     kernel1_ok: closureStatus === "KERNEL1",
     // An unmeasured comparison never counts as a passed comparison.
-    fidelity_ok: !FIDELITY_GATE || (fidelity !== null && fidelity >= FIDELITY_MIN),
+    fidelity_ok: !FIDELITY_GATE || (
+      fidelity !== null && Number.isFinite(fidelity) && fidelity >= FIDELITY_MIN && fidelity <= 1 &&
+      policyOk && formalization?.fidelity_decision === "passed" &&
+      formalization.fidelity_unsettled !== 1 && formalization.fidelity_split !== 1
+    ),
     min_confidence: MIN_CONFIDENCE,
     fidelity,
     fidelity_method: fidelityMethod,
+    formalization_id: formalization?.id ?? null,
+    fidelity_decision: formalization?.fidelity_decision ?? null,
+    fidelity_samples: formalization?.fidelity_samples ?? null,
+    fidelity_spread: formalization?.fidelity_spread_low != null && formalization.fidelity_spread_high != null
+      ? [formalization.fidelity_spread_low, formalization.fidelity_spread_high] as [number, number] : null,
+    fidelity_unsettled: formalization?.fidelity_unsettled == null ? null : formalization.fidelity_unsettled === 1,
+    fidelity_split: formalization?.fidelity_split == null ? null : formalization.fidelity_split === 1,
+    fidelity_provenance: provenance,
+    fidelity_policy_ok: policyOk,
+    translation_assurance: "caller-supplied-unverified" as const,
+    trust_note: GLOSS_TRUST_NOTE,
     fidelity_min: FIDELITY_MIN,
     fidelity_gate: FIDELITY_GATE ? ("on" as const) : ("off" as const),
     ...(fidelityMethod === "embedding"
@@ -195,7 +224,7 @@ export function commitClaim(
   };
 
   if (claim.status === "refuted") {
-    audit(db, "gate", "commit_refused", claimId, { reason: "claim is refuted", gate });
+    audit(db, "gate", "commit_refused", claimId, { reason: "claim is refuted", reportedConfidence, confidenceSource, gate });
     return {
       committed: false,
       claim_id: claimId,
@@ -230,7 +259,13 @@ export function commitClaim(
     failures.push(
       fidelity === null
         ? "formalization fidelity unmeasured (verify with a gloss); an unmeasured check never counts as a passed check"
-        : `fidelity ${fidelity.toFixed(4)} < ${FIDELITY_MIN}: the formalization may not say what the claim says — reformalize`,
+        : formalization?.fidelity_decision === "unsettled" || formalization?.fidelity_unsettled === 1 || formalization?.fidelity_split === 1
+          ? "fidelity judgment is unsettled (conflicting samples, answers, or model builds); reverify or reformalize"
+          : !formalization?.fidelity_decision
+            ? "historical fidelity has no recorded decision; reverify with a gloss under the current policy"
+            : !policyOk
+              ? "fidelity evidence uses a different or missing policy/floor; reverify with a gloss under the current configuration"
+              : `fidelity ${fidelity} does not pass the ${FIDELITY_MIN} floor and recorded decision (${formalization.fidelity_decision}); reformalize`,
     );
   }
   audit(db, "gate", "commit_refused", claimId, { failures, reportedConfidence, confidenceSource, gate });
@@ -259,12 +294,15 @@ export function saveFormalization(
     fidelity_samples?: number | null;
     fidelity_spread?: [number, number] | null;
     fidelity_unsettled?: boolean | null;
+    fidelity_split?: boolean | null;
+    fidelity_decision?: FidelityDecision | null;
+    fidelity_provenance?: FidelityProvenance | null;
     gloss: string | null;
     strengthenings: string[] | null;
   },
 ): void {
   db.prepare(
-    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, fidelity_samples, fidelity_spread_low, fidelity_spread_high, fidelity_unsettled, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO formalizations (claim_id, axioms, conjecture, backend, result, proof_confidence, fidelity, fidelity_method, fidelity_samples, fidelity_spread_low, fidelity_spread_high, fidelity_unsettled, fidelity_split, fidelity_decision, fidelity_provenance, gloss, strengthenings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   ).run(
     f.claim_id,
     JSON.stringify(f.axioms),
@@ -278,6 +316,9 @@ export function saveFormalization(
     f.fidelity_spread?.[0] ?? null,
     f.fidelity_spread?.[1] ?? null,
     f.fidelity_unsettled === undefined || f.fidelity_unsettled === null ? null : f.fidelity_unsettled ? 1 : 0,
+    f.fidelity_split == null ? null : f.fidelity_split ? 1 : 0,
+    f.fidelity_decision ?? null,
+    f.fidelity_provenance ? JSON.stringify(f.fidelity_provenance) : null,
     f.gloss,
     f.strengthenings ? JSON.stringify(f.strengthenings) : null,
   );
@@ -287,9 +328,10 @@ export function getFormalizations(
   db: Database.Database,
   claimId: number,
 ): Array<
-  Omit<Formalization, "axioms" | "strengthenings"> & {
+  Omit<Formalization, "axioms" | "strengthenings" | "fidelity_provenance"> & {
     axioms: string[];
     strengthenings: string[] | null;
+    fidelity_provenance: FidelityProvenance | null;
   }
 > {
   const rows = db
@@ -299,6 +341,7 @@ export function getFormalizations(
     ...r,
     axioms: JSON.parse(r.axioms) as string[],
     strengthenings: r.strengthenings ? (JSON.parse(r.strengthenings) as string[]) : null,
+    fidelity_provenance: r.fidelity_provenance ? JSON.parse(r.fidelity_provenance) as FidelityProvenance : null,
   }));
 }
 
@@ -335,6 +378,7 @@ export function reportedConfidenceCalibration(
   mean_reported: number | null;
   later_refuted: number;
   by_source: Record<string, { commits: number; mean_reported: number; later_refuted: number }>;
+  calibration_available: false;
   note: string;
 } {
   const rows = db
@@ -358,7 +402,7 @@ export function reportedConfidenceCalibration(
     }
   }
   if (stated.length === 0) {
-    return { commits: 0, mean_reported: null, later_refuted: 0, by_source: {}, note: "no commits recorded yet" };
+    return { commits: 0, mean_reported: null, later_refuted: 0, by_source: {}, calibration_available: false, note: "no commits recorded yet; independent correctness labels are required for calibration" };
   }
   const refuted = new Set(
     (db.prepare("SELECT id FROM claims WHERE status = 'refuted'").all() as Array<{ id: number }>).map((c) => c.id),
@@ -377,9 +421,10 @@ export function reportedConfidenceCalibration(
   return {
     ...all,
     by_source,
+    calibration_available: false,
     note:
       stated.length < minSample
-        ? `${stated.length} commits is too few to read as calibration (needs about ${minSample}); this is a record, not a trend`
-        : "stated confidence against subsequent refutation, grouped by estimator; a high mean with nonzero refutations means the self-reports run ahead of the evidence",
+        ? `${stated.length} commits is too few to read as calibration (needs about ${minSample}); these are descriptive counts, without independent correctness labels or ECE`
+        : "descriptive commit/refutation counts grouped by estimator, not ECE; unrefuted claims are unlabelled, repeat commits are not independent outcomes, and refutation alone does not establish miscalibration",
   };
 }

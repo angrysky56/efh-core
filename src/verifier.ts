@@ -19,11 +19,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { VerifyResult } from "./types.js";
+import { config } from "./config.js";
 
 const execFileP = promisify(execFile);
 
-const Z3_TIMEOUT_MS = Number(process.env.EFH_Z3_TIMEOUT_MS ?? 15000);
-const P9_TIMEOUT_S = Number(process.env.EFH_PROVER9_TIMEOUT_S ?? 30);
+const Z3_TIMEOUT_MS = config.z3TimeoutMs;
+const P9_TIMEOUT_S = config.prover9TimeoutS;
 
 // ---------------------------------------------------------------------------
 // Z3 (lazy singleton — WASM init is heavy, do it on first verification call)

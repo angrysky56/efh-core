@@ -8,12 +8,13 @@
   },
   "main": "dist/index.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.12.0"
   },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "smoke": "node test/smoke.mjs",
+    "test": "node --test test/*.test.mjs",
     "calibrate": "node test/calibrate.mjs"
   },
   "dependencies": {

@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS formalizations (
   fidelity_spread_low REAL,
   fidelity_spread_high REAL,
   fidelity_unsettled INTEGER,
+  fidelity_split INTEGER,
+  fidelity_decision TEXT,
+  fidelity_provenance TEXT,
   gloss TEXT,
   strengthenings TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -110,6 +113,9 @@ function migrate(db: Database.Database): void {
     ["fidelity_spread_low", "REAL"],
     ["fidelity_spread_high", "REAL"],
     ["fidelity_unsettled", "INTEGER"],
+    ["fidelity_split", "INTEGER"],
+    ["fidelity_decision", "TEXT"],
+    ["fidelity_provenance", "TEXT"],
   ] as const) {
     if (!cols.some((c) => c.name === name)) db.exec(`ALTER TABLE formalizations ADD COLUMN ${name} ${type}`);
   }

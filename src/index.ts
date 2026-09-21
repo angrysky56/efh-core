@@ -16,10 +16,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { defaultDbPath, openDb } from "./db.js";
-import { Embedder } from "./embeddings.js";
-import { loadState, saveState } from "./enforcer/state.js";
-import { registerTools } from "./tools.js";
 
 // An MCP host may launch this server with only a minimal environment, so a key
 // exported from a shell profile never reaches it. Real environment variables
@@ -35,6 +31,12 @@ if (existsSync(envFile)) {
 }
 
 async function main(): Promise<void> {
+  // Local modules capture configuration during evaluation. Import them only AFTER
+  // .env is loaded; moving loadEnvFile above static imports would not change ESM order.
+  const [{ defaultDbPath, openDb }, { Embedder }, { loadState, saveState }, { registerTools }] =
+    await Promise.all([
+      import("./db.js"), import("./embeddings.js"), import("./enforcer/state.js"), import("./tools.js"),
+    ]);
   const dbPath = defaultDbPath();
   const db = openDb(dbPath);
   const state = loadState(db);

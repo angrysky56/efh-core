@@ -35,11 +35,15 @@ hypothesized, not proven, to track closure. Say "verified within closure bounds,
    confidence, not aspiration.
 5. **ENFORCE** — every 2–3 tool calls: `run_admm_cycle`, then `get_closure_status`.
 6. **COMMIT** — `commit_claim(claim_id, reported_confidence)`. The gate enforces:
-   proof_confidence ≥ 0.7 ∧ formalization fidelity ≥ the floor ∧ status = KERNEL1.
-   Every leg is outside your control; `reported_confidence` is recorded for
+   proof_confidence ≥ 0.7 ∧ settled claim/gloss fidelity ≥ the floor ∧ status = KERNEL1.
+   Axioms and formula-to-gloss translation remain trust assumptions; `reported_confidence` is recorded for
    calibration and does not affect the outcome, so state it honestly rather than
    tactically. Verify with a `gloss` or fidelity stays unmeasured, which fails the
-   gate. A refusal is the system working — read the reason, do not retry blindly.
+   gate. Conflicting draws/answers or mixed model versions also refuse. Historical
+   fidelity without a recorded decision needs a new verification. The server does
+   not establish that the supplied gloss renders the formula; inspect that link
+   and the axioms before trusting the commit. A refusal is the system working —
+   read the reason, do not retry blindly.
 7. **ITERATE** — refine from proof results; loop.
 
 Session start: `reset_session(confirm=true)`. Claims persist; enforcer state does not.

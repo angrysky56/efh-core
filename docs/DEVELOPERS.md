@@ -18,7 +18,7 @@ skills (host agent)                    efh-core server (one process)
   efh-loop ─ operating loop      ┌── claim store ── SQLite: claims, links, audit
   via-negativa ─ subtraction ────┤── verifier ──── Z3 (WASM, lazy) | Prover9/Mace4 (optional)
   got-patterns ─ branch/merge    │── enforcer ──── ADMM cycles, H¹ detection, recovery
-  ethical-triage ─ Paraclete ────┘── gate ──────── commit ⇔ pc≥0.7 ∧ conf≥0.7 ∧ KERNEL1
+  ethical-triage ─ Paraclete ────┘── gate ──────── commit ⇔ pc≥0.7 ∧ settled fidelity≥floor ∧ KERNEL1
 ```
 
 ## Honest labeling (epistemic status)
@@ -66,7 +66,8 @@ onto the same edge-space key names (`edge_claim`, `edge_confidence`,
 | `trigger_recovery` | soft_relax / admm_reset / kernel_retreat / re_partition / fusion |
 | `set_restriction_map` | Wire a directed edge's projection (compare: hash \| semantic) |
 | `reset_session` | Clean enforcer slate; claims and audit persist |
-| `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ fidelity ≥ floor ∧ KERNEL1 (`reported_confidence` is recorded for calibration, not a leg) |
+| `commit_claim` | THE GATE: proof_confidence ≥ 0.7 ∧ settled fidelity ≥ floor ∧ KERNEL1 (`reported_confidence` is recorded, not a leg) |
+| `session_status` | Health: claim counts, enforcer summary, backend availability |
 
 Each row in `formalizations` records how its fidelity number was reached:
 `fidelity_method` (`judgment` | `embedding`), `fidelity_samples`,
@@ -74,8 +75,21 @@ Each row in `formalizations` records how its fidelity number was reached:
 (1 when repeated judgments straddled the floor, 0 when they settled, NULL when
 no judgment ran). A stored 0.65 from one draw and a 0.65 median of five are not
 the same evidence, and the floor cannot be calibrated without telling them
-apart.
-| `session_status` | Health: claim counts, enforcer summary, backend availability |
+apart. `fidelity_split` records disagreements between the numeric answer and
+relation label in any draw. `fidelity_decision` is `passed`, `failed`, `unsettled`,
+or `unmeasured`; historical rows retain NULL. A commit requires a recorded
+`passed` decision, matching policy/floor, and an unrounded score above the current
+floor. An unsettled or split flag independently refuses the commit.
+
+`fidelity_provenance` is JSON in SQLite and decoded by `get_formalizations`.
+It records provider, requested model, all resolved models, question SHA-256,
+policy revision, boundary, sampling settings, raw draws, and whether model
+builds differed. Embedding records identify the requested model but leave
+resolved builds empty because no concrete build was established. Commit outcomes
+and audit entries include the formalization ID, provenance, sample count, spread,
+decision, and conflict flags. Migrations add columns without inventing decisions
+or provenance for old measurements. Existing commits are not rewritten; a new
+commit attempt using historical measurements requires re-verification.
 
 ## Enforcer mathematics
 
@@ -111,10 +125,13 @@ calibration is a deployment decision — see Calibration below.
   premises) — inspect before trusting.
 - **Formalization fidelity.** Claim-bound verifications persist their full
   encoding (axioms, conjecture, result) in the `formalizations` table. The
-  verify tools accept a `gloss` — an independent English rendering of what the
-  encoding literally says, written from the formalization alone. The server
-  scores `fidelity = 1 − embedding_distance(claim_text, gloss)` and warns below
-  `EFH_FIDELITY_MIN`. Reported, never gated: thresholds come from data.
+  verify tools accept a `gloss` — an English rendering of what the axioms +
+  conjecture literally say, not a copy of the claim. The server compares the
+  gloss with the claim using Jev when enabled, otherwise embedding similarity.
+  This does not verify the formula-to-gloss translation: that remains a caller
+  trust assumption, reported by verification and commit tools. Missing, failed,
+  unsettled, or historical undecided fidelity blocks commitment unless the
+  explicitly reported `EFH_GATE_FIDELITY=off` override is set.
 - **Strengthenings cap.** Declaring `strengthenings` (concrete `define-fun`
   interpretations for uninterpreted functions, bounds, finitizations) enforces
   the logical asymmetry: models and refutations under strengthening remain

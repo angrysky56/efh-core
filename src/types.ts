@@ -91,6 +91,31 @@ export interface VerifyResult {
   elapsed_ms: number;
 }
 
+export type FidelityDecision = "passed" | "failed" | "unsettled" | "unmeasured";
+
+/** Unrounded provider output for one judgment draw. */
+export interface FidelityDraw {
+  noul: number;
+  relation: string;
+  confidence: number;
+  model: string;
+}
+
+/** Evidence needed to interpret a score across model and policy changes. */
+export interface FidelityProvenance {
+  provider: "typesafe" | "openrouter" | "ollama";
+  requested_model: string;
+  /** Empty for embeddings: Ollama model names do not establish a concrete build. */
+  resolved_models: string[];
+  question_revision: string | null;
+  policy_revision: string;
+  boundary: number;
+  resample_band: number | null;
+  resample_samples: number | null;
+  draws: FidelityDraw[];
+  mixed_models: boolean;
+}
+
 /** A persisted formal encoding of a claim — reviewable and replayable. */
 export interface Formalization {
   id: number;
@@ -101,7 +126,7 @@ export interface Formalization {
   backend: string;
   result: string;
   proof_confidence: number | null;
-  /** 1 − embedding distance between claim text and the independent gloss; null if unmeasured. */
+  /** Claim/gloss agreement, not verification that the gloss renders the formula. */
   fidelity: number | null;
   fidelity_method: string | null;
   fidelity_samples: number | null;
@@ -109,6 +134,11 @@ export interface Formalization {
   fidelity_spread_high: number | null;
   /** SQLite has no boolean: 1 when repeated judgments straddled the floor. */
   fidelity_unsettled: number | null;
+  fidelity_split: number | null;
+  /** NULL for historical rows: an old score is not a decision under the current policy. */
+  fidelity_decision: FidelityDecision | null;
+  /** JSON provenance; decoded by getFormalizations. */
+  fidelity_provenance: string | null;
   gloss: string | null;
   /** JSON array of declared strengthenings (UF interpretations, bounds); null if faithful. */
   strengthenings: string | null;

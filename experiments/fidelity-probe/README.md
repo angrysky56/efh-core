@@ -83,8 +83,18 @@ head-to-head table.
 
 ## End to end through the gate
 
+Run `EFH_JUDGE=jev node experiments/fidelity-probe/gate-e2e.mjs` after building.
+The script always creates its own unique temporary database, overrides any
+inherited or `.env` database path, and removes its scratch directory on completion
+or failure. It does not use a caller-supplied ledger path.
+
 `gate-e2e.mjs` drives the real MCP surface: one claim, one set of axioms, one Z3
 proof, two glosses. Z3 returns `proved` both times.
+
+The numbers below are historical live measurements. The current gate also
+requires a settled decision, and records raw draws and model provenance. It
+checks claim/gloss agreement; the example assumes the English rendering of the
+formula was supplied correctly and does not validate that translation step.
 
 ```
 PASS faithful:   proof=proved fidelity=0.69 (judgment, equivalent)     committed=true

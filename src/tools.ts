@@ -13,6 +13,8 @@ import type Database from "better-sqlite3";
 import { z } from "zod";
 import type { Embedder } from "./embeddings.js";
 import { Judge, judgeBand, judgeBoundary, judgeEnabled, judgeSamples } from "./judge.js";
+import { config } from "./config.js";
+import { fidelityDecision, FIDELITY_POLICY_REVISION, GLOSS_TRUST_NOTE } from "./fidelity.js";
 import { runFullCycle } from "./enforcer/admm.js";
 import {
   saveState,
@@ -21,7 +23,7 @@ import {
   type SessionState as TSessionState,
 } from "./enforcer/state.js";
 import * as store from "./store.js";
-import type { CycleReport, RecoveryRecommendation, VerifyResult } from "./types.js";
+import type { CycleReport, RecoveryRecommendation, VerifyResult, FidelityDecision, FidelityProvenance } from "./types.js";
 import {
   capStrengthened,
   mace4FindModel,
@@ -43,13 +45,14 @@ const text = (obj: unknown) => ({
 });
 
 /** Below this, the gloss (what the formalization says) diverges from the claim (what was meant). */
-const FIDELITY_MIN = Number(process.env.EFH_FIDELITY_MIN ?? 0.6);
+const FIDELITY_MIN = config.fidelityMin;
 
 const GLOSS_DESC =
-  "Independent English rendering of what the axioms + conjecture LITERALLY say, written " +
+  "English rendering of what the axioms + conjecture LITERALLY say, written " +
   "from the formalization alone (do not copy the claim text). Used to measure formalization " +
-  "fidelity: embedding similarity between gloss and claim text. Low fidelity means your " +
-  "encoding may not say what the claim says — reformalize rather than argue.";
+  "fidelity: claim/gloss agreement by the configured comparator. The server does not " +
+  "verify the formula-to-gloss translation; that remains a trust assumption. " +
+  "Low fidelity means the encoding may not say what the claim says — reformalize.";
 
 const STRENGTHENINGS_DESC =
   "Declare anything that STRENGTHENS the encoding beyond the claim: concrete define-fun " +
@@ -76,7 +79,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
    * "do these hold in the same situations?", which is a different design, not a
    * bug fix, so it is a separate opt-in from the fidelity channel.
    */
-  const monitorJudge = () => judgeEnabled() && (process.env.EFH_JUDGE_MONITOR ?? "off").toLowerCase() === "on";
+  const monitorJudge = () => judgeEnabled() && config.judgeMonitor;
   const comparator = () => (monitorJudge() ? judge : embedder);
   let state = ctx.state;
   let lastCycle: CycleReport | null = null;
@@ -110,69 +113,80 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
     gloss: string | undefined,
   ): Promise<{
     fidelity: number | null;
+    fidelity_decision: FidelityDecision;
+    fidelity_provenance?: FidelityProvenance;
     fidelity_method?: "judgment" | "embedding";
     fidelity_relation?: string;
     fidelity_samples?: number;
     fidelity_spread?: [number, number];
-    fidelity_unsettled?: true;
-    fidelity_split?: true;
+    fidelity_unsettled?: boolean;
+    fidelity_split?: boolean;
     fidelity_warning?: true;
     fidelity_note?: string;
+    fidelity_caveat?: string;
   }> => {
-    if (!claimText) return { fidelity: null };
+    if (!claimText) return { fidelity: null, fidelity_decision: "unmeasured" };
     if (!gloss) {
-      return { fidelity: null, fidelity_note: "no gloss supplied — formalization fidelity unmeasured" };
+      return { fidelity: null, fidelity_decision: "unmeasured", fidelity_note: "no gloss supplied — formalization fidelity unmeasured" };
     }
     const below = (fidelity: number, method: "judgment" | "embedding", extra: Record<string, unknown>) =>
       fidelity < FIDELITY_MIN
         ? {
             fidelity,
+            fidelity_decision: fidelityDecision(fidelity, FIDELITY_MIN),
             fidelity_method: method,
             ...extra,
             fidelity_warning: true as const,
             fidelity_note: `fidelity ${fidelity} < ${FIDELITY_MIN}: the formalization may not say what the claim says — reformalize`,
           }
-        : { fidelity, fidelity_method: method, ...extra };
+        : { fidelity, fidelity_decision: fidelityDecision(fidelity, FIDELITY_MIN), fidelity_method: method, ...extra };
     if (judgeEnabled()) {
       try {
         const j = await judge.equivalence(claimText, gloss);
-        return below(j.same_truth_conditions, "judgment", {
+        return {
+          ...below(j.same_truth_conditions, "judgment", {}),
+          fidelity_decision: j.decision,
+          fidelity_provenance: j.provenance,
           fidelity_relation: j.relation,
           fidelity_samples: j.samples,
-          ...(j.samples > 1 ? { fidelity_spread: j.spread } : {}),
-          ...(j.unsettled
+          fidelity_spread: j.spread,
+          fidelity_unsettled: j.unsettled,
+          fidelity_split: j.split,
+          ...(j.decision === "unsettled"
             ? {
-                fidelity_unsettled: true as const,
-                fidelity_note_unsettled:
-                  `repeated judgments fell on both sides of the floor (${j.spread[0]}–${j.spread[1]}); ` +
-                  "the lowest is used, because an undecided comparison must not read as a passed one — " +
-                  "reformalize or write a gloss that states the direction of the implication explicitly",
+                fidelity_warning: true as const,
+                fidelity_note:
+                  "Unsettled judgment: samples cross the floor, question answers conflict, or model builds differ. " +
+                  "The fidelity gate refuses this result; reformalize or review the gloss before retrying.",
               }
             : {}),
-          // Two independent views of one pair; a split is a hard case, not a verdict.
-          ...(j.split
-            ? {
-                fidelity_split: true as const,
-                fidelity_note_split: `the relation label (${j.relation}) and the truth-condition score disagree — treat this formalization as unsettled and reformalize or check it by hand`,
-              }
-            : {}),
-        });
+        };
       } catch (err) {
         return {
           fidelity: null,
+          fidelity_decision: "unmeasured",
           fidelity_note: `fidelity unmeasured: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
     try {
       const d = await embedder.distance(claimText, gloss);
-      return below(Math.round((1 - d) * 10000) / 10000, "embedding", {
+      const fidelity = 1 - d;
+      if (!Number.isFinite(fidelity) || fidelity < 0 || fidelity > 1) throw new Error("invalid embedding comparison");
+      return {
+        ...below(fidelity, "embedding", {}),
+        fidelity_provenance: {
+          provider: "ollama", requested_model: config.embedModel, resolved_models: [], question_revision: null,
+          policy_revision: FIDELITY_POLICY_REVISION, boundary: FIDELITY_MIN,
+          resample_band: null, resample_samples: null, draws: [], mixed_models: false,
+        },
         fidelity_caveat:
           "embedding similarity reads topical overlap and cannot see negation or quantifier scope; set EFH_JUDGE=jev for a typed judgment",
-      });
+      };
     } catch (err) {
       return {
         fidelity: null,
+        fidelity_decision: "unmeasured",
         fidelity_note: `fidelity unmeasured: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
@@ -314,6 +328,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           fidelity_samples: fid.fidelity_samples ?? null,
           fidelity_spread: fid.fidelity_spread ?? null,
           fidelity_unsettled: fid.fidelity_method === "judgment" ? (fid.fidelity_unsettled ?? false) : null,
+          fidelity_split: fid.fidelity_method === "judgment" ? (fid.fidelity_split ?? false) : null,
+          fidelity_decision: fid.fidelity_decision,
+          fidelity_provenance: fid.fidelity_provenance ?? null,
           gloss: gloss ?? null,
           strengthenings: strengthenings ?? null,
         });
@@ -322,7 +339,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
       if (claim_id !== undefined) {
         claim = store.recordVerification(db, claim_id, pc, contradiction, result.detail);
       }
-      return text({ ...result, proof_confidence: pc, ...capFlags, ...fid, claim });
+      return text({ ...result, proof_confidence: pc, ...capFlags, ...fid, trust_note: GLOSS_TRUST_NOTE, claim });
     },
   );
 
@@ -397,6 +414,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           fidelity_samples: fid.fidelity_samples ?? null,
           fidelity_spread: fid.fidelity_spread ?? null,
           fidelity_unsettled: fid.fidelity_method === "judgment" ? (fid.fidelity_unsettled ?? false) : null,
+          fidelity_split: fid.fidelity_method === "judgment" ? (fid.fidelity_split ?? false) : null,
+          fidelity_decision: fid.fidelity_decision,
+          fidelity_provenance: fid.fidelity_provenance ?? null,
           gloss: gloss ?? null,
           strengthenings: strengthenings ?? null,
         });
@@ -405,7 +425,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
       if (claim_id !== undefined) {
         claim = store.recordVerification(db, claim_id, pc, found, result.detail);
       }
-      return text({ ...result, counterexample_found: found, proof_confidence: pc, ...capFlags, ...fid, claim });
+      return text({ ...result, counterexample_found: found, proof_confidence: pc, ...capFlags, ...fid, trust_note: GLOSS_TRUST_NOTE, claim });
     },
   );
 
@@ -641,9 +661,9 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
       description:
         "Commit a claim to the world model. THE GATE — all three must hold: " +
         "proof_confidence ≥ 0.7 (from a verify call bound to this claim), " +
-        "formalization fidelity ≥ the floor (the encoding was measured to say what the " +
-        "claim says; unmeasured counts as failed), closure_status = KERNEL1. " +
-        "Every leg is something you do not control. A refusal is a normal result with the " +
+        "settled claim/gloss fidelity ≥ the floor (unmeasured or unsettled counts as failed), " +
+        "closure_status = KERNEL1. Supplied axioms and the formula-to-gloss translation " +
+        "remain trust assumptions. A refusal is a normal result with the " +
         "reason and a recovery recommendation — it is the consistency check working.",
       inputSchema: {
         claim_id: z.number().int(),
@@ -716,7 +736,7 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
           prover9_available: prover9,
           ollama,
           semantic_channel:
-            (process.env.EFH_SEMANTIC ?? "on").toLowerCase() === "off"
+            !config.semanticEnabled
               ? "off (hash fallback)"
               : monitorJudge()
                 ? "typed judgment — compares truth conditions, not just claim identity"
@@ -730,8 +750,11 @@ export function registerTools(server: McpServer, ctx: Ctx): void {
             monitor_channel: monitorJudge(),
           },
         },
-        commit_min_confidence: Number(process.env.EFH_COMMIT_MIN_CONFIDENCE ?? 0.7),
+        commit_min_confidence: config.commitMinConfidence,
         fidelity_min: FIDELITY_MIN,
+        fidelity_gate: config.fidelityGate ? "on" : "off",
+        fidelity_policy: FIDELITY_POLICY_REVISION,
+        trust_note: GLOSS_TRUST_NOTE,
         gate_legs: ["proof_confidence", "fidelity", "closure_status"],
         reported_confidence: store.reportedConfidenceCalibration(db),
       });

@@ -7,7 +7,7 @@
 > **Status note.** The gate no longer consumes `confidence_score`. A number the
 > author supplies about its own output cannot verify that output, so counting it
 > as a gate leg overstated the gate's independence; it is now recorded as
-> `reported_confidence` and reported back as calibration by `session_status`.
+> `reported_confidence` and reported as descriptive statistics by `session_status`.
 > That does not retire this spec; it relocates where its output lands.
 >
 > **Decision (2026-09-20, Ty): measured, not trusted.** A probe-derived
@@ -17,11 +17,15 @@
 > recorded, and compared against what happened to the claim.
 >
 > `commit_claim` therefore takes `confidence_source` alongside
-> `reported_confidence`, and `session_status` groups calibration by it. That
-> makes this spec's central claim (ECE 0.044 for probes against 0.093 for
-> verbalized) checkable on real claims in this system rather than cited from a
-> paper: build the probe, commit with `confidence_source: "probe"`, and read the
-> two groups against subsequent refutations.
+> `reported_confidence`, and `session_status` groups observations by it. The
+> current summary does not calculate ECE or independently label correctness;
+> it reports `calibration_available: false`. Comparing this spec's quoted ECE
+> figures requires a separately labelled evaluation set and an ECE calculation.
+> Subsequent refutations alone do not supply those labels, and unrefuted claims
+> must not automatically be counted as correct.
+
+The design sections below are retained as historical research context. References
+to confidence gating or replacing a gate leg are superseded by the decision above.
 
 ## Problem
 

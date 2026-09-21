@@ -28,24 +28,33 @@ control:
    graded levels (think green → yellow → orange → red) before the
    inconsistency can contaminate anything.
 4. **A gate.** A claim is committed to the knowledge base only when three
-   conditions hold at once: the proof succeeded, the formalization was measured
-   to say what the claim says, and the monitor shows green. A refusal is not an
+   conditions hold at once: the proof succeeded, the supplied English gloss has
+   a settled match with the claim, and the monitor shows green. A refusal is not an
    error — it is the system working.
 
-Each leg is something the model does not control. The fidelity leg is there
-because a proof is narrower than it looks: it establishes that the conjecture
-follows from the axioms, and says nothing about whether those formulas mean
-what the claim meant. Encode the wrong thing and the prover will soundly prove
-it. An unmeasured fidelity counts as a failed check, never a passed one.
+The prover establishes that the conjecture follows from the supplied axioms.
+The fidelity channel compares the supplied gloss with the claim; **it does not
+verify that the gloss describes the formula**. Axioms and that translation remain
+trust assumptions. An unrelated proof paired with a misleading gloss can still
+pass, so review the encoding before treating a commit as established knowledge.
+Every commit outcome and verification result reports this limitation.
+
+Unmeasured or unsettled fidelity fails the gate. Samples crossing the floor,
+conflicting relation/score answers, or draws from different model builds are
+unsettled regardless of their median. Decisions use unrounded numbers. Historical
+rows without a recorded decision, or measurements made at a different floor,
+need a new verification before another commit attempt; existing ledger records
+are preserved.
 
 The model's own stated confidence is recorded in the audit trail and reported
-back as calibration, but it is **not** a gate condition. A number the author
+back as descriptive statistics, but it is **not** a gate condition. A number the author
 supplies about its own output cannot verify that output, and counting it as a
 check made the gate look more independent than it was. Measured, not trusted:
 `commit_claim` also records which estimator produced that number, and
-`session_status` groups calibration by estimator, so a better one — an
-activation probe, say — has to demonstrate itself on real claims instead of
-being asserted.
+`session_status` groups these observations by estimator. It does not calculate
+ECE or establish which estimator is calibrated: that needs independent
+correctness labels. A later refutation or revised formalization is a review
+candidate, not an automatic label for whether the original gloss was faithful.
 
 Everything is recorded. Every assertion, proof, refusal, and recovery lands in
 an audit trail, so "how do we know this?" always has a checkable answer.
@@ -132,10 +141,11 @@ First session, in plain terms:
 ```
 reset_session(confirm: true)                        # clean slate
 assert_claim("if a<b and b<c then a<c", 0.95)       # claim #1 enters the ledger
-verify_implication(axioms..., "(< a c)", claim_id:1) # Z3: proved, in milliseconds
+verify_implication(axioms..., "(< a c)", claim_id:1,
+  gloss:"For numbers a, b, c: if a is below b and b below c, then a is below c.")
 register_agent_state("reasoner", {...})              # tell the monitor your view
 run_admm_cycle()                                     # monitor: green (KERNEL1)
-commit_claim(1, 0.95)                                # gate: committed
+commit_claim(1, 0.95)                                # commits if fidelity is settled and passes
 get_audit_trail()                                    # the whole story, timestamped
 ```
 

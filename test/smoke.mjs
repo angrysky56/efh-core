@@ -24,6 +24,13 @@ const { loadState, saveState } = await import("../dist/enforcer/state.js");
 const { runFullCycle, stringToFloat } = await import("../dist/enforcer/admm.js");
 const { Embedder } = await import("../dist/embeddings.js");
 const store = await import("../dist/store.js");
+const { FIDELITY_POLICY_REVISION } = await import("../dist/fidelity.js");
+// Synthetic measurements used only for direct store/gate fixtures.
+const fixtureProvenance = {
+  provider: "typesafe", requested_model: "jev-smoke-fixture", resolved_models: ["jev-smoke-fixture"],
+  question_revision: "smoke-fixture", policy_revision: FIDELITY_POLICY_REVISION,
+  boundary: 0.6, resample_band: 0.15, resample_samples: 5, draws: [], mixed_models: false,
+};
 const { z3VerifyImplication, z3FindCounterexample, z3CheckConsistency, capStrengthened } =
   await import("../dist/verifier.js");
 
@@ -143,6 +150,8 @@ store.saveFormalization(db, {
   result: "proved",
   proof_confidence: 1,
   fidelity: 1,
+  fidelity_decision: "passed",
+  fidelity_provenance: fixtureProvenance,
   gloss: "p holds given that p is asserted",
   strengthenings: ["f(x) := 2x (example)"],
 });
@@ -162,6 +171,8 @@ store.saveFormalization(db, {
   claim_id: claim.id, axioms: ["(declare-const r Bool)", "(assert r)"], conjecture: "r",
   backend: "z3", result: "proved", proof_confidence: 1, fidelity: 0.65,
   fidelity_method: "judgment", fidelity_samples: 5, fidelity_spread: [0.61, 0.69],
+  fidelity_decision: "passed",
+  fidelity_provenance: fixtureProvenance,
   fidelity_unsettled: false, gloss: "r holds given that r is asserted", strengthenings: null,
 });
 {
@@ -202,6 +213,8 @@ check("gate commits under KERNEL1 + proof + fidelity", outcome.committed === tru
   store.saveFormalization(db, {
     claim_id: twin.id, axioms: ["(declare-const p Bool)", "(assert p)"], conjecture: "p",
     backend: "z3", result: "proved", proof_confidence: 1, fidelity: 1,
+    fidelity_decision: "passed",
+    fidelity_provenance: fixtureProvenance,
     fidelity_method: "judgment", gloss: "p holds given that p is asserted", strengthenings: null,
   });
   const zero = store.commitClaim(db, twin.id, 0.0, state.closure_status);
@@ -240,6 +253,8 @@ store.saveFormalization(db, {
   result: "proved",
   proof_confidence: 1,
   fidelity: 0.21,
+  fidelity_decision: "failed",
+  fidelity_provenance: fixtureProvenance,
   fidelity_method: "judgment",
   gloss: "an unrelated statement about kiln temperature",
   strengthenings: null,
@@ -247,7 +262,7 @@ store.saveFormalization(db, {
 const drift = store.commitClaim(db, drifted.id, 0.95, state.closure_status);
 check(
   "gate refuses a proved claim whose formalization is unfaithful",
-  drift.committed === false && drift.reason.includes("0.2100"),
+  drift.committed === false && drift.gate.fidelity === 0.21 && drift.gate.fidelity_decision === "failed",
   drift.reason,
 );
 
@@ -426,6 +441,8 @@ check(
   store.saveFormalization(db, {
     claim_id: probed.id, axioms: ["(declare-const p Bool)", "(assert p)"], conjecture: "p",
     backend: "z3", result: "proved", proof_confidence: 1, fidelity: 0.95,
+    fidelity_decision: "passed",
+    fidelity_provenance: fixtureProvenance,
     fidelity_method: "judgment", gloss: "p holds given that p is asserted", strengthenings: null,
   });
   state.resetAdmm(); // sanctioned de-escalation -> KERNEL1

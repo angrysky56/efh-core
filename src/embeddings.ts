@@ -8,9 +8,10 @@
 
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
+import { config } from "./config.js";
 
-const OLLAMA_HOST = process.env.OLLAMA_HOST ?? "http://localhost:11434";
-const EMBED_MODEL = process.env.EFH_EMBED_MODEL ?? "nomic-embed-text";
+const OLLAMA_HOST = config.ollamaHost;
+const EMBED_MODEL = config.embedModel;
 
 export class EmbeddingUnavailableError extends Error {
   constructor(cause: string) {
@@ -25,7 +26,7 @@ export class EmbeddingUnavailableError extends Error {
 }
 
 export function semanticEnabled(): boolean {
-  return (process.env.EFH_SEMANTIC ?? "on").toLowerCase() !== "off";
+  return config.semanticEnabled;
 }
 
 function sha256(text: string): string {
